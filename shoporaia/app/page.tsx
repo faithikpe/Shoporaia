@@ -65,22 +65,22 @@ function ProductCard({
   onToggleWishlist: () => void;
 }) {
   return (
-    <article className="overflow-hidden rounded-2xl border border-pink-100 bg-white">
-      <div className="relative">
+    <article className="group relative overflow-hidden rounded-2xl border border-pink-100/80 bg-white shadow-[0_5px_15px_rgba(64,37,63,0.06)] transition-all duration-500 hover:-translate-y-2 hover:border-[#d9b7ca] hover:shadow-[0_22px_40px_rgba(64,37,63,0.16)]">
+      <div className="relative overflow-hidden">
         {product.image ? (
           <img
             src={product.image}
             alt={product.name}
-            className="h-48 w-full object-cover sm:h-64"
+            className="h-48 w-full object-cover transition-transform duration-700 group-hover:scale-110 sm:h-64"
           />
         ) : (
-          <div className="flex h-48 items-center justify-center bg-[#fcf7fa] text-sm text-gray-400 sm:h-64">
+          <div className="flex h-48 items-center justify-center bg-gradient-to-br from-[#fcf7fa] to-[#f1e1eb] text-sm text-gray-400 sm:h-64">
             Image coming soon
           </div>
         )}
 
         <span
-          className={`absolute left-3 top-3 rounded-full px-3 py-2 text-[10px] font-medium ${
+          className={`absolute left-3 top-3 rounded-full px-3 py-2 text-[10px] font-medium shadow-md ${
             product.stock
               ? "bg-white text-green-800"
               : "bg-[#40253f] text-white"
@@ -90,7 +90,7 @@ function ProductCard({
         </span>
 
         {product.isNew && (
-          <span className="absolute right-14 top-3 rounded-full bg-[#f9eef3] px-3 py-2 text-[10px] font-semibold text-[#40253f]">
+          <span className="absolute right-14 top-3 rounded-full bg-[#f9eef3] px-3 py-2 text-[10px] font-semibold text-[#40253f] shadow-md">
             NEW
           </span>
         )}
@@ -99,7 +99,7 @@ function ProductCard({
           type="button"
           onClick={onToggleWishlist}
           aria-label={isWishlisted ? "Remove from wishlist" : "Add to wishlist"}
-          className="absolute right-3 top-3 flex h-9 w-9 items-center justify-center rounded-full bg-white text-xl shadow-sm transition hover:scale-110"
+          className="absolute right-3 top-3 flex h-9 w-9 items-center justify-center rounded-full bg-white text-xl shadow-lg transition-all duration-300 hover:scale-110 hover:bg-[#f9eef3] active:scale-95"
         >
           <span className={isWishlisted ? "text-pink-600" : "text-gray-500"}>
             {isWishlisted ? "♥" : "♡"}
@@ -107,7 +107,7 @@ function ProductCard({
         </button>
       </div>
 
-      <div className="p-4">
+      <div className="relative bg-gradient-to-b from-white to-[#fdf9fb] p-4">
         <p className="text-xs text-gray-400">{product.category}</p>
 
         <h3 className="mt-2 min-h-10 text-sm font-semibold text-[#40253f]">
@@ -123,7 +123,7 @@ function ProductCard({
         <button
           type="button"
           onClick={onAdd}
-          className="mt-4 w-full rounded-full bg-[#40253f] px-3 py-3 text-xs font-medium text-white transition hover:bg-[#70466b]"
+          className="mt-4 w-full rounded-full bg-gradient-to-br from-[#51324f] to-[#40253f] px-3 py-3 text-xs font-medium text-white shadow-[0_5px_12px_rgba(64,37,63,0.22)] transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_9px_18px_rgba(64,37,63,0.3)] active:translate-y-0"
         >
           Add to Bag
         </button>
@@ -155,23 +155,21 @@ export default function Home() {
   const [checkingOut, setCheckingOut] = useState(false);
   const [checkoutError, setCheckoutError] = useState("");
 
-  // New homepage navigation states
   const [showMenu, setShowMenu] = useState(false);
   const [announcementIndex, setAnnouncementIndex] = useState(0);
+  const [announcementVisible, setAnnouncementVisible] = useState(true);
 
-  // Order request form
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [customerEmail, setCustomerEmail] = useState("");
   const [deliveryPreference, setDeliveryPreference] = useState("Pickup");
   const [customerNote, setCustomerNote] = useState("");
 
-  // Order confirmation
   const [orderSubmitted, setOrderSubmitted] = useState(false);
   const [submittedOrderNumber, setSubmittedOrderNumber] = useState("");
   const [submittedWhatsAppUrl, setSubmittedWhatsAppUrl] = useState("");
 
-  // Rotate the announcement messages
+  // Rotate announcements and hide the announcement bar after a few seconds.
   useEffect(() => {
     const interval = setInterval(() => {
       setAnnouncementIndex((previous) =>
@@ -179,11 +177,18 @@ export default function Home() {
       );
     }, 4000);
 
-    return () => clearInterval(interval);
+    const hideAnnouncement = setTimeout(() => {
+      setAnnouncementVisible(false);
+    }, 6500);
+
+    return () => {
+      clearInterval(interval);
+      clearTimeout(hideAnnouncement);
+    };
   }, []);
 
   // Lock the homepage whenever the cart or wishlist is open.
-  // The open panel will still scroll independently.
+  // Each open panel retains its own independent scroll area.
   useEffect(() => {
     if (!showCart && !showWishlist) return;
 
@@ -618,10 +623,24 @@ export default function Home() {
     setShowMenu(false);
   }
 
+  function openWishlistFromMenu() {
+    setShowCart(false);
+    setShowWishlist(true);
+    setShowMenu(false);
+    setAccountDropdown(false);
+  }
+
   return (
-    <main className="min-h-screen bg-white text-[#302033]">
+    <main className="min-h-screen overflow-x-hidden bg-white text-[#302033]">
       {/* ROTATING ANNOUNCEMENT BAR */}
-      <div className="relative flex min-h-10 items-center justify-center overflow-hidden bg-[#40253f] px-10 py-3 text-center text-[10px] font-medium tracking-[0.16em] text-white sm:text-xs">
+      <div
+        aria-hidden={!announcementVisible}
+        className={`relative flex items-center justify-center overflow-hidden bg-gradient-to-r from-[#40253f] via-[#593653] to-[#40253f] px-10 text-center text-[10px] font-medium tracking-[0.16em] text-white shadow-[0_4px_14px_rgba(64,37,63,0.18)] transition-all duration-700 ease-in-out sm:text-xs ${
+          announcementVisible
+            ? "max-h-12 min-h-10 py-3 opacity-100"
+            : "max-h-0 min-h-0 -translate-y-full py-0 opacity-0"
+        }`}
+      >
         <span
           key={announcementIndex}
           className="animate-[fadeIn_0.6s_ease-in-out]"
@@ -643,25 +662,27 @@ export default function Home() {
         </div>
       </div>
 
-      {/* NEW HEADER */}
-      <header className="sticky top-0 z-40 border-b border-pink-100 bg-white/95 backdrop-blur-md">
+      {/* HEADER */}
+      <header className="sticky top-0 z-40 border-b border-pink-100 bg-white/95 shadow-[0_5px_18px_rgba(64,37,63,0.07)] backdrop-blur-md">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6 sm:py-4">
 
           {/* LOGO */}
           <a
             href="#home"
             onClick={closeMenu}
-            className="flex shrink-0 items-center gap-2.5"
+            className="flex shrink-0 items-center gap-2"
           >
-            <span className="flex h-11 w-11 items-center justify-center rounded-full border border-[#b47c9c] bg-[#f9eef3] text-xl font-semibold text-[#40253f]">
-              O
-            </span>
+            <img
+              src="/oraia-monogram.png"
+              alt="Oraia by Dara monogram"
+              className="h-9 w-9 object-contain sm:h-10 sm:w-10"
+            />
 
             <span>
-              <span className="block text-lg font-bold leading-none tracking-[0.16em] text-[#40253f] sm:text-xl">
+              <span className="block text-base font-bold leading-none tracking-[0.14em] text-[#40253f] sm:text-lg">
                 ORAIA
               </span>
-              <span className="mt-1 block text-[9px] font-medium tracking-[0.38em] text-[#b47c9c]">
+              <span className="mt-1 block text-[8px] font-medium tracking-[0.32em] text-[#b47c9c]">
                 BY DARA
               </span>
             </span>
@@ -680,7 +701,7 @@ export default function Home() {
                 href="/login"
                 aria-label="Log in"
                 title="Log in"
-                className="flex h-10 w-10 items-center justify-center rounded-full border border-pink-100 text-lg text-[#40253f] transition hover:bg-[#f9eef3]"
+                className="flex h-10 w-10 items-center justify-center rounded-full border border-pink-100 bg-white text-lg text-[#40253f] shadow-[0_3px_9px_rgba(64,37,63,0.08)] transition-all hover:-translate-y-0.5 hover:bg-[#f9eef3] hover:shadow-md"
               >
                 <svg
                   viewBox="0 0 24 24"
@@ -702,7 +723,7 @@ export default function Home() {
                   }
                   aria-label="My account"
                   title="My account"
-                  className="flex h-10 w-10 items-center justify-center rounded-full border border-pink-100 text-[#40253f] transition hover:bg-[#f9eef3]"
+                  className="flex h-10 w-10 items-center justify-center rounded-full border border-pink-100 bg-white text-[#40253f] shadow-[0_3px_9px_rgba(64,37,63,0.08)] transition-all hover:-translate-y-0.5 hover:bg-[#f9eef3] hover:shadow-md"
                 >
                   <svg
                     viewBox="0 0 24 24"
@@ -717,7 +738,7 @@ export default function Home() {
                 </button>
 
                 {accountDropdown && (
-                  <div className="absolute right-0 top-full z-50 mt-3 w-56 overflow-hidden rounded-xl border border-pink-100 bg-white shadow-xl">
+                  <div className="absolute right-0 top-full z-50 mt-3 w-56 overflow-hidden rounded-xl border border-pink-100 bg-white shadow-[0_15px_35px_rgba(64,37,63,0.18)]">
                     <a
                       href="/account"
                       className="block px-5 py-4 text-sm text-[#40253f] hover:bg-[#fcf7fa]"
@@ -758,26 +779,6 @@ export default function Home() {
               </div>
             )}
 
-            {/* WISHLIST */}
-            <button
-              type="button"
-              onClick={() => {
-                setShowCart(false);
-                setShowWishlist(true);
-                closeMenu();
-              }}
-              aria-label="Open wishlist"
-              title="Wishlist"
-              className="relative flex h-10 w-10 items-center justify-center rounded-full border border-pink-100 text-xl text-[#40253f] transition hover:bg-[#f9eef3]"
-            >
-              ♡
-              {wishlist.length > 0 && (
-                <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#b47c9c] px-1 text-[9px] font-semibold text-white">
-                  {wishlist.length}
-                </span>
-              )}
-            </button>
-
             {/* SHOPPING BAG */}
             <button
               type="button"
@@ -788,7 +789,7 @@ export default function Home() {
               }}
               aria-label="Open shopping bag"
               title="Shopping bag"
-              className="relative flex h-10 w-10 items-center justify-center rounded-full border border-pink-100 text-[#40253f] transition hover:bg-[#f9eef3]"
+              className="relative flex h-10 w-10 items-center justify-center rounded-full border border-pink-100 bg-white text-[#40253f] shadow-[0_3px_9px_rgba(64,37,63,0.08)] transition-all hover:-translate-y-0.5 hover:bg-[#f9eef3] hover:shadow-md"
             >
               <svg
                 viewBox="0 0 24 24"
@@ -802,7 +803,7 @@ export default function Home() {
               </svg>
 
               {cartCount > 0 && (
-                <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#40253f] px-1 text-[9px] font-semibold text-white">
+                <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#40253f] px-1 text-[9px] font-semibold text-white shadow-md">
                   {cartCount}
                 </span>
               )}
@@ -817,7 +818,7 @@ export default function Home() {
               }}
               aria-label={showMenu ? "Close menu" : "Open menu"}
               aria-expanded={showMenu}
-              className="flex h-10 items-center gap-2 rounded-full bg-[#40253f] px-4 text-xs font-medium text-white transition hover:bg-[#70466b]"
+              className="flex h-10 items-center gap-2 rounded-full bg-gradient-to-br from-[#51324f] to-[#40253f] px-4 text-xs font-medium text-white shadow-[0_5px_12px_rgba(64,37,63,0.25)] transition-all hover:-translate-y-0.5 hover:shadow-lg active:translate-y-0"
             >
               <span className="text-base leading-none">
                 {showMenu ? "×" : "☰"}
@@ -831,7 +832,7 @@ export default function Home() {
 
         {/* EXPANDABLE NAVIGATION MENU */}
         {showMenu && (
-          <div className="absolute left-0 right-0 top-full z-50 border-t border-pink-100 bg-white shadow-xl">
+          <div className="absolute left-0 right-0 top-full z-50 border-t border-pink-100 bg-white shadow-[0_20px_35px_rgba(64,37,63,0.16)]">
             <div className="mx-auto max-w-7xl px-5 py-6 sm:px-8">
               <div className="grid gap-8 md:grid-cols-3">
 
@@ -857,6 +858,24 @@ export default function Home() {
                         {label}
                       </a>
                     ))}
+
+                    {/* WISHLIST INSIDE MENU */}
+                    <button
+                      type="button"
+                      onClick={openWishlistFromMenu}
+                      className="flex w-full items-center justify-between rounded-lg px-3 py-3 text-left text-sm text-[#40253f] transition hover:bg-[#fcf7fa]"
+                    >
+                      <span>Wishlist</span>
+
+                      <span className="flex items-center gap-2 text-xs text-[#b47c9c]">
+                        {wishlist.length > 0 && (
+                          <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-[#f9eef3] px-1.5 font-semibold">
+                            {wishlist.length}
+                          </span>
+                        )}
+                        <span>♡</span>
+                      </span>
+                    </button>
                   </nav>
                 </div>
 
@@ -884,7 +903,7 @@ export default function Home() {
                   </nav>
                 </div>
 
-                <div className="rounded-2xl bg-[#f9eef3] p-5">
+                <div className="rounded-2xl border border-white bg-gradient-to-br from-[#fffafd] via-[#f9eef3] to-[#efdce7] p-5 shadow-[inset_0_1px_4px_rgba(255,255,255,0.9),0_8px_20px_rgba(64,37,63,0.08)]">
                   <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#b47c9c]">
                     Your Oraia Account
                   </p>
@@ -903,7 +922,7 @@ export default function Home() {
                     <a
                       href="/account"
                       onClick={closeMenu}
-                      className="mt-5 inline-block rounded-full bg-[#40253f] px-5 py-3 text-xs font-medium text-white"
+                      className="mt-5 inline-block rounded-full bg-[#40253f] px-5 py-3 text-xs font-medium text-white shadow-md transition hover:-translate-y-0.5 hover:shadow-lg"
                     >
                       My Dashboard
                     </a>
@@ -912,7 +931,7 @@ export default function Home() {
                       <a
                         href="/login"
                         onClick={closeMenu}
-                        className="rounded-full border border-[#40253f] px-5 py-3 text-xs font-medium text-[#40253f]"
+                        className="rounded-full border border-[#40253f] px-5 py-3 text-xs font-medium text-[#40253f] transition hover:bg-white"
                       >
                         Log In
                       </a>
@@ -920,7 +939,7 @@ export default function Home() {
                       <a
                         href="/signup"
                         onClick={closeMenu}
-                        className="rounded-full bg-[#40253f] px-5 py-3 text-xs font-medium text-white"
+                        className="rounded-full bg-[#40253f] px-5 py-3 text-xs font-medium text-white shadow-md transition hover:-translate-y-0.5 hover:shadow-lg"
                       >
                         Create Account
                       </a>
@@ -948,7 +967,7 @@ export default function Home() {
       {/* CART PANEL */}
       {showCart && (
         <div
-          className="fixed inset-0 z-[70] flex h-dvh justify-end overflow-hidden overscroll-none bg-black/40"
+          className="fixed inset-0 z-[70] flex h-dvh justify-end overflow-hidden overscroll-none bg-black/40 backdrop-blur-[2px]"
           onClick={(event) => {
             if (event.target === event.currentTarget) {
               setShowCart(false);
@@ -956,7 +975,7 @@ export default function Home() {
           }}
         >
           <div className="flex h-dvh w-full max-w-lg flex-col overflow-hidden bg-white shadow-2xl">
-            <div className="flex shrink-0 items-center justify-between border-b border-pink-100 px-6 py-5">
+            <div className="flex shrink-0 items-center justify-between border-b border-pink-100 px-6 py-5 shadow-sm">
               <div>
                 <p className="text-xs uppercase tracking-widest text-[#b47c9c]">
                   Your Selection
@@ -987,7 +1006,7 @@ export default function Home() {
                   </p>
                   <button
                     onClick={() => setShowCart(false)}
-                    className="mt-6 rounded-full bg-[#40253f] px-6 py-3 text-sm text-white"
+                    className="mt-6 rounded-full bg-[#40253f] px-6 py-3 text-sm text-white shadow-md transition hover:-translate-y-0.5 hover:shadow-lg"
                   >
                     Continue Shopping
                   </button>
@@ -1003,7 +1022,7 @@ export default function Home() {
                         <img
                           src={product.image}
                           alt={product.name}
-                          className="h-24 w-24 rounded-xl object-cover"
+                          className="h-24 w-24 rounded-xl object-cover shadow-md"
                         />
                       ) : (
                         <div className="flex h-24 w-24 items-center justify-center rounded-xl bg-[#fcf7fa] text-xs text-gray-400">
@@ -1068,7 +1087,7 @@ export default function Home() {
             {orderSubmitted ? (
               <div className="max-h-[45%] shrink-0 overflow-y-auto overscroll-contain border-t border-pink-100 p-6">
                 <div className="py-5 text-center">
-                  <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-green-50 text-3xl text-green-600">
+                  <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-green-50 text-3xl text-green-600 shadow-inner">
                     ✓
                   </div>
 
@@ -1081,7 +1100,7 @@ export default function Home() {
                     request has been received successfully.
                   </p>
 
-                  <div className="mt-5 rounded-xl bg-[#fcf7fa] p-4">
+                  <div className="mt-5 rounded-xl bg-[#fcf7fa] p-4 shadow-inner">
                     <p className="text-xs text-gray-500">
                       Your order number
                     </p>
@@ -1099,7 +1118,7 @@ export default function Home() {
                     href={submittedWhatsAppUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="mt-5 block w-full rounded-full bg-[#40253f] px-6 py-4 text-sm font-semibold text-white hover:bg-[#70466b]"
+                    className="mt-5 block w-full rounded-full bg-[#40253f] px-6 py-4 text-sm font-semibold text-white shadow-md transition hover:-translate-y-0.5 hover:shadow-lg"
                   >
                     Follow Up on WhatsApp
                   </a>
@@ -1142,7 +1161,7 @@ export default function Home() {
                         setCustomerName(event.target.value)
                       }
                       placeholder="Enter your full name"
-                      className="w-full rounded-xl border border-pink-200 px-4 py-3 text-sm outline-none focus:border-[#40253f]"
+                      className="w-full rounded-xl border border-pink-200 px-4 py-3 text-sm text-[#302033] placeholder:text-gray-400 outline-none focus:border-[#40253f]"
                       required
                     />
                   </div>
@@ -1158,7 +1177,7 @@ export default function Home() {
                         setCustomerPhone(event.target.value)
                       }
                       placeholder="Enter your phone number"
-                      className="w-full rounded-xl border border-pink-200 px-4 py-3 text-sm outline-none focus:border-[#40253f]"
+                      className="w-full rounded-xl border border-pink-200 px-4 py-3 text-sm text-[#302033] placeholder:text-gray-400 outline-none focus:border-[#40253f]"
                       required
                     />
                   </div>
@@ -1174,7 +1193,7 @@ export default function Home() {
                         setCustomerEmail(event.target.value)
                       }
                       placeholder="Enter your email address"
-                      className="w-full rounded-xl border border-pink-200 px-4 py-3 text-sm outline-none focus:border-[#40253f]"
+                      className="w-full rounded-xl border border-pink-200 px-4 py-3 text-sm text-[#302033] placeholder:text-gray-400 outline-none focus:border-[#40253f]"
                     />
                   </div>
 
@@ -1187,7 +1206,7 @@ export default function Home() {
                       onChange={(event) =>
                         setDeliveryPreference(event.target.value)
                       }
-                      className="w-full rounded-xl border border-pink-200 bg-white px-4 py-3 text-sm outline-none focus:border-[#40253f]"
+                      className="w-full rounded-xl border border-pink-200 bg-white px-4 py-3 text-sm text-[#302033] outline-none focus:border-[#40253f]"
                     >
                       <option value="Pickup">Pickup</option>
                       <option value="Paid delivery">Paid delivery</option>
@@ -1205,7 +1224,7 @@ export default function Home() {
                       }
                       placeholder="Any additional information about your order?"
                       rows={3}
-                      className="w-full rounded-xl border border-pink-200 px-4 py-3 text-sm outline-none focus:border-[#40253f]"
+                      className="w-full rounded-xl border border-pink-200 px-4 py-3 text-sm text-[#302033] placeholder:text-gray-400 outline-none focus:border-[#40253f]"
                     />
                   </div>
                 </div>
@@ -1219,7 +1238,7 @@ export default function Home() {
                 <button
                   onClick={handleCheckout}
                   disabled={checkingOut}
-                  className="mt-5 w-full rounded-full bg-[#40253f] px-6 py-4 text-sm font-semibold text-white hover:bg-[#70466b] disabled:opacity-50"
+                  className="mt-5 w-full rounded-full bg-gradient-to-br from-[#51324f] to-[#40253f] px-6 py-4 text-sm font-semibold text-white shadow-[0_5px_14px_rgba(64,37,63,0.24)] transition hover:-translate-y-0.5 hover:shadow-lg disabled:opacity-50"
                 >
                   {checkingOut
                     ? "Submitting Order Request..."
@@ -1246,7 +1265,7 @@ export default function Home() {
       {/* WISHLIST PANEL */}
       {showWishlist && (
         <div
-          className="fixed inset-0 z-[70] flex h-dvh justify-end overflow-hidden overscroll-none bg-black/40"
+          className="fixed inset-0 z-[70] flex h-dvh justify-end overflow-hidden overscroll-none bg-black/40 backdrop-blur-[2px]"
           onClick={(event) => {
             if (event.target === event.currentTarget) {
               setShowWishlist(false);
@@ -1254,7 +1273,7 @@ export default function Home() {
           }}
         >
           <div className="flex h-dvh w-full max-w-lg flex-col overflow-hidden bg-white shadow-2xl">
-            <div className="flex shrink-0 items-center justify-between border-b border-pink-100 px-6 py-5">
+            <div className="flex shrink-0 items-center justify-between border-b border-pink-100 px-6 py-5 shadow-sm">
               <div>
                 <p className="text-xs uppercase tracking-widest text-[#b47c9c]">
                   Your Favourites
@@ -1285,7 +1304,7 @@ export default function Home() {
                   </p>
                   <button
                     onClick={() => setShowWishlist(false)}
-                    className="mt-6 rounded-full bg-[#40253f] px-6 py-3 text-sm text-white"
+                    className="mt-6 rounded-full bg-[#40253f] px-6 py-3 text-sm text-white shadow-md transition hover:-translate-y-0.5 hover:shadow-lg"
                   >
                     Explore Products
                   </button>
@@ -1301,7 +1320,7 @@ export default function Home() {
                         <img
                           src={product.image}
                           alt={product.name}
-                          className="h-24 w-24 rounded-xl object-cover"
+                          className="h-24 w-24 rounded-xl object-cover shadow-md"
                         />
                       ) : (
                         <div className="flex h-24 w-24 items-center justify-center rounded-xl bg-[#fcf7fa] text-xs text-gray-400">
@@ -1323,7 +1342,7 @@ export default function Home() {
                             onClick={() =>
                               moveWishlistItemToCart(product.id)
                             }
-                            className="rounded-full bg-[#40253f] px-4 py-2 text-xs text-white"
+                            className="rounded-full bg-[#40253f] px-4 py-2 text-xs text-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
                           >
                             Move to Bag
                           </button>
@@ -1345,14 +1364,17 @@ export default function Home() {
         </div>
       )}
 
-      {/* REDESIGNED HERO */}
+      {/* REDESIGNED 3D HERO */}
       <section
         id="home"
-        className="overflow-hidden bg-[#f9eef3] px-5 py-14 md:py-24"
+        className="relative isolate overflow-hidden bg-gradient-to-br from-[#fffafd] via-[#f9eef3] to-[#efdce7] px-5 py-16 md:py-24"
       >
-        <div className="mx-auto grid max-w-7xl items-center gap-10 md:grid-cols-2 md:gap-14">
+        <div className="pointer-events-none absolute -right-24 top-0 h-80 w-80 rounded-full bg-[#e9cbdc]/70 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-24 left-0 h-72 w-72 rounded-full bg-white/80 blur-3xl" />
+
+        <div className="relative mx-auto grid max-w-7xl items-center gap-12 md:grid-cols-2 md:gap-14">
           <div className="max-w-xl">
-            <p className="mb-5 text-[10px] font-semibold uppercase tracking-[0.3em] text-[#ad7191] sm:text-xs">
+            <p className="mb-5 inline-block rounded-full border border-[#e8cbdc] bg-white/70 px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.3em] text-[#ad7191] shadow-sm sm:text-xs">
               A World of Beautiful Finds
             </p>
 
@@ -1375,14 +1397,14 @@ export default function Home() {
             <div className="mt-8 flex flex-wrap gap-3">
               <a
                 href="#catalogue"
-                className="rounded-full bg-[#40253f] px-7 py-4 text-sm font-medium text-white transition hover:bg-[#70466b]"
+                className="rounded-full bg-gradient-to-br from-[#51324f] to-[#40253f] px-7 py-4 text-sm font-medium text-white shadow-[0_9px_20px_rgba(64,37,63,0.24)] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_15px_25px_rgba(64,37,63,0.3)] active:translate-y-0"
               >
                 Discover the Collection
               </a>
 
               <a
                 href="#services"
-                className="rounded-full border border-[#40253f] px-7 py-4 text-sm font-medium text-[#40253f] transition hover:bg-white"
+                className="rounded-full border border-[#40253f]/30 bg-white/70 px-7 py-4 text-sm font-medium text-[#40253f] shadow-sm transition-all duration-300 hover:-translate-y-1 hover:bg-white hover:shadow-lg"
               >
                 Shop For Me
               </a>
@@ -1404,16 +1426,19 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="relative">
-            <div className="absolute -right-5 -top-5 h-32 w-32 rounded-full bg-[#eddae5] blur-2xl" />
+          <div className="relative mx-auto w-full max-w-xl">
+            <div className="absolute -right-5 -top-5 h-40 w-40 rounded-full bg-[#e8cbdc] blur-3xl" />
+            <div className="absolute -bottom-7 -left-5 h-40 w-40 rounded-full bg-white blur-3xl" />
 
-            <img
-              src="https://images.unsplash.com/photo-1483985988355-763728e1935b?w=1200"
-              alt="Fashion shopping collection"
-              className="relative h-80 w-full rounded-[2rem] object-cover shadow-lg md:h-[480px]"
-            />
+            <div className="relative rounded-[2.4rem] border border-white/80 bg-white/40 p-3 shadow-[0_25px_60px_rgba(64,37,63,0.18)] backdrop-blur-sm transition-transform duration-500 hover:-translate-y-2">
+              <img
+                src="https://images.unsplash.com/photo-1483985988355-763728e1935b?w=1200"
+                alt="Fashion shopping collection"
+                className="h-80 w-full rounded-[1.9rem] object-cover shadow-[0_12px_30px_rgba(64,37,63,0.18)] md:h-[480px]"
+              />
+            </div>
 
-            <div className="absolute -bottom-5 left-4 rounded-2xl bg-white px-5 py-4 shadow-lg sm:left-8">
+            <div className="absolute -bottom-5 left-4 rounded-2xl border border-white/80 bg-white/95 px-5 py-4 shadow-[0_12px_28px_rgba(64,37,63,0.16)] sm:left-8">
               <p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-[#b47c9c]">
                 Shop with Oraia
               </p>
@@ -1426,13 +1451,16 @@ export default function Home() {
       </section>
 
       {/* SHOPPING BENEFITS */}
-      <section className="mx-auto grid max-w-7xl gap-5 px-5 py-10 sm:grid-cols-3">
+      <section className="mx-auto grid max-w-7xl gap-5 px-5 py-12 sm:grid-cols-3">
         {[
           ["01", "Quality Finds", "Carefully sourced products."],
           ["02", "Easy Ordering", "Shop multiple products in one order."],
           ["03", "Delivery Options", "Choose pickup or paid delivery in Nigeria."],
         ].map((item) => (
-          <div key={item[0]} className="rounded-xl bg-[#fcf7fa] p-6">
+          <div
+            key={item[0]}
+            className="rounded-2xl border border-pink-100/80 bg-gradient-to-br from-white to-[#fcf7fa] p-6 shadow-[0_7px_18px_rgba(64,37,63,0.07)] transition-all duration-300 hover:-translate-y-2 hover:shadow-[0_17px_30px_rgba(64,37,63,0.13)]"
+          >
             <p className="text-sm text-[#b47c9c]">{item[0]}</p>
             <h3 className="mt-2 font-semibold text-[#40253f]">
               {item[1]}
@@ -1443,7 +1471,7 @@ export default function Home() {
       </section>
 
       {/* NEW ARRIVALS */}
-      <section id="new-arrivals" className="mx-auto max-w-7xl px-5 py-14">
+      <section id="new-arrivals" className="mx-auto max-w-7xl px-5 py-16">
         <div className="mb-8">
           <p className="text-xs uppercase tracking-widest text-[#b47c9c]">
             Fresh Finds
@@ -1472,7 +1500,7 @@ export default function Home() {
       </section>
 
       {/* IN STOCK */}
-      <section id="in-stock" className="bg-[#fcf7fa] px-5 py-14">
+      <section id="in-stock" className="bg-gradient-to-br from-[#fcf7fa] to-[#f4e8ef] px-5 py-16">
         <div className="mx-auto max-w-7xl">
           <div className="mb-8">
             <p className="text-xs uppercase tracking-widest text-[#b47c9c]">
@@ -1503,7 +1531,7 @@ export default function Home() {
       </section>
 
       {/* CHINA PREORDER */}
-      <section id="china-preorder" className="mx-auto max-w-7xl px-5 py-14">
+      <section id="china-preorder" className="mx-auto max-w-7xl px-5 py-16">
         <div className="mb-8">
           <p className="text-xs uppercase tracking-widest text-[#b47c9c]">
             Source Your Favourites
@@ -1535,7 +1563,7 @@ export default function Home() {
       </section>
 
       {/* CATEGORIES */}
-      <section className="bg-[#f9eef3] px-5 py-14">
+      <section className="bg-gradient-to-br from-[#f9eef3] to-[#f0dfE9] px-5 py-16">
         <div className="mx-auto max-w-7xl">
           <p className="text-xs uppercase tracking-widest text-[#ad7191]">
             Find Your Favourites
@@ -1555,10 +1583,10 @@ export default function Home() {
                     behavior: "smooth",
                   });
                 }}
-                className={`rounded-full border px-6 py-3 text-sm ${
+                className={`rounded-full border px-6 py-3 text-sm shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-md ${
                   category === item
-                    ? "border-[#40253f] bg-[#40253f] text-white"
-                    : "border-pink-200 bg-white text-[#40253f]"
+                    ? "border-[#40253f] bg-gradient-to-br from-[#51324f] to-[#40253f] text-white shadow-[0_6px_14px_rgba(64,37,63,0.22)]"
+                    : "border-pink-200 bg-white text-[#40253f] hover:border-[#c99db7]"
                 }`}
               >
                 {item}
@@ -1569,7 +1597,7 @@ export default function Home() {
       </section>
 
       {/* PRODUCT CATALOGUE */}
-      <section id="catalogue" className="mx-auto max-w-7xl px-5 py-14">
+      <section id="catalogue" className="mx-auto max-w-7xl px-5 py-16">
         <div className="mb-8 flex flex-wrap items-end justify-between gap-5">
           <div>
             <p className="text-xs uppercase tracking-widest text-[#b47c9c]">
@@ -1585,7 +1613,7 @@ export default function Home() {
             placeholder="Search products..."
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            className="w-full rounded-full border border-pink-200 px-5 py-3 text-sm outline-none sm:w-64"
+            className="w-full rounded-full border border-pink-200 bg-white px-5 py-3 text-sm text-[#302033] shadow-[0_4px_12px_rgba(64,37,63,0.06)] placeholder:text-gray-400 outline-none transition focus:border-[#40253f] focus:shadow-md sm:w-64"
           />
         </div>
 
@@ -1598,11 +1626,11 @@ export default function Home() {
             Loading products...
           </p>
         ) : error ? (
-          <div className="rounded-xl bg-[#fcf7fa] p-6 text-center">
+          <div className="rounded-xl bg-[#fcf7fa] p-6 text-center shadow-inner">
             <p className="text-sm text-red-600">{error}</p>
             <button
               onClick={loadProducts}
-              className="mt-4 rounded-full bg-[#40253f] px-6 py-3 text-sm text-white"
+              className="mt-4 rounded-full bg-[#40253f] px-6 py-3 text-sm text-white shadow-md transition hover:-translate-y-0.5 hover:shadow-lg"
             >
               Try Again
             </button>
@@ -1623,7 +1651,7 @@ export default function Home() {
       </section>
 
       {/* PERSONAL SHOPPING AND PROCUREMENT */}
-      <section id="services" className="bg-[#f9eef3] px-5 py-16">
+      <section id="services" className="bg-gradient-to-br from-[#f9eef3] to-[#f1e1eb] px-5 py-16">
         <div className="mx-auto max-w-7xl">
           <p className="text-xs uppercase tracking-widest text-[#ad7191]">
             More Than Just Shopping
@@ -1639,7 +1667,7 @@ export default function Home() {
           </p>
 
           <div className="mt-9 grid gap-6 md:grid-cols-2">
-            <div className="rounded-2xl bg-white p-8">
+            <div className="rounded-2xl border border-white/80 bg-white/90 p-8 shadow-[0_10px_25px_rgba(64,37,63,0.09)] transition-all duration-300 hover:-translate-y-2 hover:shadow-[0_20px_35px_rgba(64,37,63,0.15)]">
               <h3 className="text-xl font-semibold text-[#40253f]">
                 Personal Shopping
               </h3>
@@ -1657,13 +1685,13 @@ export default function Home() {
                 href="https://wa.me/2349043423379?text=Hello%20Oraia%20by%20Dara%2C%20I%20need%20personal%20shopping%20assistance."
                 target="_blank"
                 rel="noreferrer"
-                className="mt-6 inline-block rounded-full bg-[#40253f] px-6 py-3 text-sm text-white"
+                className="mt-6 inline-block rounded-full bg-gradient-to-br from-[#51324f] to-[#40253f] px-6 py-3 text-sm text-white shadow-md transition-all hover:-translate-y-1 hover:shadow-lg"
               >
                 Request Personal Shopping
               </a>
             </div>
 
-            <div className="rounded-2xl bg-white p-8">
+            <div className="rounded-2xl border border-white/80 bg-white/90 p-8 shadow-[0_10px_25px_rgba(64,37,63,0.09)] transition-all duration-300 hover:-translate-y-2 hover:shadow-[0_20px_35px_rgba(64,37,63,0.15)]">
               <h3 className="text-xl font-semibold text-[#40253f]">
                 Import and Procurement
               </h3>
@@ -1682,7 +1710,7 @@ export default function Home() {
                 href="https://wa.me/2349043423379?text=Hello%20Oraia%20by%20Dara%2C%20I%20need%20import%20and%20procurement%20assistance."
                 target="_blank"
                 rel="noreferrer"
-                className="mt-6 inline-block rounded-full bg-[#40253f] px-6 py-3 text-sm text-white"
+                className="mt-6 inline-block rounded-full bg-gradient-to-br from-[#51324f] to-[#40253f] px-6 py-3 text-sm text-white shadow-md transition-all hover:-translate-y-1 hover:shadow-lg"
               >
                 Discuss Your Order
               </a>
@@ -1711,7 +1739,7 @@ export default function Home() {
           </div>
 
           <div className="mt-10 grid gap-6 md:grid-cols-3">
-            <div className="rounded-2xl border border-pink-100 bg-white p-7 shadow-sm">
+            <div className="rounded-2xl border border-pink-100 bg-gradient-to-br from-white to-[#fcf7fa] p-7 shadow-[0_9px_22px_rgba(64,37,63,0.08)] transition-all duration-300 hover:-translate-y-2 hover:shadow-[0_19px_35px_rgba(64,37,63,0.14)]">
               <div className="text-3xl">✈️</div>
               <p className="mt-5 text-xs font-semibold uppercase tracking-widest text-[#b47c9c]">
                 Fastest Option
@@ -1728,7 +1756,7 @@ export default function Home() {
               </p>
             </div>
 
-            <div className="rounded-2xl border border-pink-100 bg-white p-7 shadow-sm">
+            <div className="rounded-2xl border border-pink-100 bg-gradient-to-br from-white to-[#fcf7fa] p-7 shadow-[0_9px_22px_rgba(64,37,63,0.08)] transition-all duration-300 hover:-translate-y-2 hover:shadow-[0_19px_35px_rgba(64,37,63,0.14)]">
               <div className="text-3xl">🛫</div>
               <p className="mt-5 text-xs font-semibold uppercase tracking-widest text-[#b47c9c]">
                 Two Available Options
@@ -1737,7 +1765,7 @@ export default function Home() {
                 Air Shipping
               </h3>
 
-              <div className="mt-5 rounded-xl bg-[#fcf7fa] p-4">
+              <div className="mt-5 rounded-xl bg-[#fcf7fa] p-4 shadow-inner">
                 <p className="font-semibold text-[#40253f]">GZ Air</p>
                 <p className="mt-1 text-sm text-gray-500">
                   For normal goods
@@ -1747,7 +1775,7 @@ export default function Home() {
                 </p>
               </div>
 
-              <div className="mt-4 rounded-xl bg-[#fcf7fa] p-4">
+              <div className="mt-4 rounded-xl bg-[#fcf7fa] p-4 shadow-inner">
                 <p className="font-semibold text-[#40253f]">
                   Hong Kong Air
                 </p>
@@ -1760,7 +1788,7 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="rounded-2xl border border-pink-100 bg-white p-7 shadow-sm">
+            <div className="rounded-2xl border border-pink-100 bg-gradient-to-br from-white to-[#fcf7fa] p-7 shadow-[0_9px_22px_rgba(64,37,63,0.08)] transition-all duration-300 hover:-translate-y-2 hover:shadow-[0_19px_35px_rgba(64,37,63,0.14)]">
               <div className="text-3xl">🚢</div>
               <p className="mt-5 text-xs font-semibold uppercase tracking-widest text-[#b47c9c]">
                 Longer Transit
@@ -1778,7 +1806,7 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="mt-8 rounded-2xl bg-[#f9eef3] p-7">
+          <div className="mt-8 rounded-2xl border border-white bg-gradient-to-br from-[#f9eef3] to-[#f1e1eb] p-7 shadow-[0_8px_20px_rgba(64,37,63,0.07)]">
             <h3 className="font-semibold text-[#40253f]">
               Important Shipping Information
             </h3>
@@ -1800,7 +1828,7 @@ export default function Home() {
       </section>
 
       {/* HOW IT WORKS */}
-      <section id="how-it-works" className="bg-[#fcf7fa] px-5 py-16">
+      <section id="how-it-works" className="bg-gradient-to-br from-[#fcf7fa] to-[#f3e6ee] px-5 py-16">
         <div className="mx-auto max-w-7xl">
           <div className="text-center">
             <p className="text-xs uppercase tracking-widest text-[#ad7191]">
@@ -1839,8 +1867,11 @@ export default function Home() {
                 "Arrange pickup or paid delivery to your address.",
               ],
             ].map((item) => (
-              <div key={item[0]} className="p-4">
-                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-[#f9eef3] font-semibold text-[#40253f]">
+              <div
+                key={item[0]}
+                className="rounded-2xl border border-white/80 bg-white/75 p-5 shadow-[0_7px_18px_rgba(64,37,63,0.07)] transition-all duration-300 hover:-translate-y-2 hover:shadow-[0_16px_28px_rgba(64,37,63,0.13)]"
+              >
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-[#f9eef3] to-[#e8cbdc] font-semibold text-[#40253f] shadow-inner">
                   {item[0]}
                 </div>
 
@@ -1859,52 +1890,57 @@ export default function Home() {
 
       {/* CUSTOMER ACCOUNT */}
       <section className="mx-auto max-w-7xl px-5 py-16">
-        <div className="rounded-2xl bg-[#40253f] px-7 py-10 text-white md:px-12">
-          <p className="text-xs uppercase tracking-widest text-pink-200">
-            Your Orders, Made Easier
-          </p>
+        <div className="relative overflow-hidden rounded-[2rem] bg-gradient-to-br from-[#593653] via-[#40253f] to-[#301c30] px-7 py-10 text-white shadow-[0_20px_45px_rgba(64,37,63,0.24)] md:px-12">
+          <div className="pointer-events-none absolute -right-16 -top-20 h-64 w-64 rounded-full bg-white/10 blur-3xl" />
+          <div className="pointer-events-none absolute -bottom-24 left-1/3 h-64 w-64 rounded-full bg-pink-300/10 blur-3xl" />
 
-          <h2 className="mt-3 text-3xl font-semibold">
-            {user ? "Welcome Back to Oraia" : "Welcome to Your Oraia Account"}
-          </h2>
+          <div className="relative">
+            <p className="text-xs uppercase tracking-widest text-pink-200">
+              Your Orders, Made Easier
+            </p>
 
-          <p className="mt-4 max-w-2xl text-sm leading-7 text-pink-100">
-            {user
-              ? "Visit your customer dashboard to manage your profile and shopping details."
-              : "Create an account or log in to access your customer dashboard and manage your shopping details."}
-          </p>
+            <h2 className="mt-3 text-3xl font-semibold">
+              {user ? "Welcome Back to Oraia" : "Welcome to Your Oraia Account"}
+            </h2>
 
-          <div className="mt-7 flex flex-wrap gap-3">
-            {user ? (
-              <a
-                href="/account"
-                className="rounded-full bg-white px-7 py-3 text-sm font-semibold text-[#40253f] hover:bg-pink-100"
-              >
-                My Dashboard
-              </a>
-            ) : (
-              <>
+            <p className="mt-4 max-w-2xl text-sm leading-7 text-pink-100">
+              {user
+                ? "Visit your customer dashboard to manage your profile and shopping details."
+                : "Create an account or log in to access your customer dashboard and manage your shopping details."}
+            </p>
+
+            <div className="mt-7 flex flex-wrap gap-3">
+              {user ? (
                 <a
-                  href="/signup"
-                  className="rounded-full bg-white px-7 py-3 text-sm font-semibold text-[#40253f] hover:bg-pink-100"
+                  href="/account"
+                  className="rounded-full bg-white px-7 py-3 text-sm font-semibold text-[#40253f] shadow-md transition hover:-translate-y-1 hover:bg-pink-100 hover:shadow-lg"
                 >
-                  Create Account
+                  My Dashboard
                 </a>
+              ) : (
+                <>
+                  <a
+                    href="/signup"
+                    className="rounded-full bg-white px-7 py-3 text-sm font-semibold text-[#40253f] shadow-md transition hover:-translate-y-1 hover:bg-pink-100 hover:shadow-lg"
+                  >
+                    Create Account
+                  </a>
 
-                <a
-                  href="/login"
-                  className="rounded-full border border-white px-7 py-3 text-sm font-semibold text-white hover:bg-white/10"
-                >
-                  Log In
-                </a>
-              </>
-            )}
+                  <a
+                    href="/login"
+                    className="rounded-full border border-white px-7 py-3 text-sm font-semibold text-white transition hover:-translate-y-1 hover:bg-white/10"
+                  >
+                    Log In
+                  </a>
+                </>
+              )}
+            </div>
           </div>
         </div>
       </section>
 
       {/* FOOTER */}
-      <footer className="bg-[#40253f] px-5 py-12 text-white">
+      <footer className="bg-gradient-to-br from-[#51324f] to-[#301c30] px-5 py-12 text-white">
         <div className="mx-auto grid max-w-7xl gap-8 sm:grid-cols-2">
           <div>
             <h2 className="text-2xl font-bold tracking-widest">
@@ -1946,7 +1982,7 @@ export default function Home() {
               href="https://wa.me/2349043423379"
               target="_blank"
               rel="noreferrer"
-              className="mt-4 inline-block rounded-full bg-white px-5 py-3 text-sm font-medium text-[#40253f]"
+              className="mt-4 inline-block rounded-full bg-white px-5 py-3 text-sm font-medium text-[#40253f] shadow-md transition hover:-translate-y-1 hover:shadow-lg"
             >
               Contact Us on WhatsApp
             </a>
