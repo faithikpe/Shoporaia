@@ -161,6 +161,42 @@ export default function Home() {
   const [submittedOrderNumber, setSubmittedOrderNumber] = useState("");
   const [submittedWhatsAppUrl, setSubmittedWhatsAppUrl] = useState("");
 
+  // Lock the homepage whenever the cart or wishlist is open.
+  // The open panel will still scroll independently.
+  useEffect(() => {
+    if (!showCart && !showWishlist) return;
+
+    const scrollY = window.scrollY;
+    const body = document.body;
+
+    const previousStyles = {
+      position: body.style.position,
+      top: body.style.top,
+      left: body.style.left,
+      right: body.style.right,
+      width: body.style.width,
+      overflow: body.style.overflow,
+    };
+
+    body.style.position = "fixed";
+    body.style.top = `-${scrollY}px`;
+    body.style.left = "0";
+    body.style.right = "0";
+    body.style.width = "100%";
+    body.style.overflow = "hidden";
+
+    return () => {
+      body.style.position = previousStyles.position;
+      body.style.top = previousStyles.top;
+      body.style.left = previousStyles.left;
+      body.style.right = previousStyles.right;
+      body.style.width = previousStyles.width;
+      body.style.overflow = previousStyles.overflow;
+
+      window.scrollTo(0, scrollY);
+    };
+  }, [showCart, showWishlist]);
+
   // Load saved cart and wishlist
   useEffect(() => {
     try {
@@ -421,7 +457,10 @@ export default function Home() {
       return;
     }
 
-    if (customerEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail.trim())) {
+    if (
+      customerEmail.trim() &&
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail.trim())
+    ) {
       setCheckoutError("Please enter a valid email address.");
       return;
     }
@@ -585,8 +624,8 @@ export default function Home() {
             <button
               type="button"
               onClick={() => {
-                setShowCart(true);
                 setShowWishlist(false);
+                setShowCart(true);
               }}
               className="rounded-full bg-[#40253f] px-4 py-3 text-xs font-medium text-white hover:bg-[#70466b]"
             >
@@ -596,8 +635,8 @@ export default function Home() {
             <button
               type="button"
               onClick={() => {
-                setShowWishlist(true);
                 setShowCart(false);
+                setShowWishlist(true);
               }}
               className="rounded-full border border-pink-200 bg-[#f9eef3] px-4 py-3 text-xs font-medium text-[#40253f]"
             >
@@ -681,9 +720,16 @@ export default function Home() {
 
       {/* CART PANEL */}
       {showCart && (
-        <div className="fixed inset-0 z-[70] flex justify-end bg-black/40">
-          <div className="flex h-full w-full max-w-lg flex-col bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-pink-100 px-6 py-5">
+        <div
+          className="fixed inset-0 z-[70] flex h-dvh justify-end overflow-hidden overscroll-none bg-black/40"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              setShowCart(false);
+            }
+          }}
+        >
+          <div className="flex h-dvh w-full max-w-lg flex-col overflow-hidden bg-white shadow-2xl">
+            <div className="flex shrink-0 items-center justify-between border-b border-pink-100 px-6 py-5">
               <div>
                 <p className="text-xs uppercase tracking-widest text-[#b47c9c]">
                   Your Selection
@@ -701,7 +747,8 @@ export default function Home() {
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-6">
+            {/* Shopping bag has its own independent scroll area */}
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-6">
               {cartProducts.length === 0 && !orderSubmitted ? (
                 <div className="py-16 text-center">
                   <p className="text-4xl text-[#b47c9c]">♡</p>
@@ -792,7 +839,7 @@ export default function Home() {
             </div>
 
             {orderSubmitted ? (
-              <div className="border-t border-pink-100 p-6">
+              <div className="max-h-[45%] shrink-0 overflow-y-auto overscroll-contain border-t border-pink-100 p-6">
                 <div className="py-5 text-center">
                   <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-green-50 text-3xl text-green-600">
                     ✓
@@ -844,7 +891,7 @@ export default function Home() {
                 </div>
               </div>
             ) : cartProducts.length > 0 ? (
-              <div className="border-t border-pink-100 p-6">
+              <div className="max-h-[55%] shrink-0 overflow-y-auto overscroll-contain border-t border-pink-100 p-6">
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-500">Product total</span>
                   <span className="font-semibold text-[#40253f]">
@@ -971,9 +1018,16 @@ export default function Home() {
 
       {/* WISHLIST PANEL */}
       {showWishlist && (
-        <div className="fixed inset-0 z-[70] flex justify-end bg-black/40">
-          <div className="flex h-full w-full max-w-lg flex-col bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-pink-100 px-6 py-5">
+        <div
+          className="fixed inset-0 z-[70] flex h-dvh justify-end overflow-hidden overscroll-none bg-black/40"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              setShowWishlist(false);
+            }
+          }}
+        >
+          <div className="flex h-dvh w-full max-w-lg flex-col overflow-hidden bg-white shadow-2xl">
+            <div className="flex shrink-0 items-center justify-between border-b border-pink-100 px-6 py-5">
               <div>
                 <p className="text-xs uppercase tracking-widest text-[#b47c9c]">
                   Your Favourites
@@ -991,7 +1045,8 @@ export default function Home() {
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-6">
+            {/* Wishlist has its own independent scroll area */}
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-6">
               {wishlistProducts.length === 0 ? (
                 <div className="py-16 text-center">
                   <p className="text-4xl text-pink-500">♡</p>
