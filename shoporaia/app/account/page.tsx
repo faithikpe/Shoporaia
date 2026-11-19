@@ -1,7 +1,8 @@
 
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
@@ -14,10 +15,10 @@ type CustomerProfile = {
   username: string | null;
   email: string | null;
   phone: string | null;
+  country: string | null;
   state: string | null;
   city: string | null;
   delivery_address: string | null;
-  country: string | null;
 };
 
 type CustomerAddress = {
@@ -29,7 +30,7 @@ type CustomerAddress = {
   state: string;
   city: string;
   delivery_address: string;
-  address_label: string;
+  address_label: string | null;
   is_default: boolean;
   created_at?: string;
 };
@@ -45,7 +46,60 @@ type AddressForm = {
   is_default: boolean;
 };
 
-type AccountView = "dashboard" | "profile" | "addresses";
+type CustomerOrder = {
+  id: string;
+  order_number: string;
+  order_status: string;
+  payment_status: string;
+  shipping_status: string | null;
+  tracking_number: string | null;
+  shipping_carrier: string | null;
+  shipping_notes: string | null;
+  subtotal: number;
+  total_amount: number;
+  currency: string | null;
+  created_at: string;
+};
+
+type OrderItem = {
+  id: string;
+  order_id: string;
+  product_name: string;
+  product_image: string | null;
+  quantity: number;
+  unit_price: number;
+  total_price: number;
+};
+
+type CustomerInvoice = {
+  id: string;
+  order_id: string | null;
+  invoice_number: string;
+  invoice_type: string | null;
+  amount: number;
+  payment_status: string;
+  due_date: string | null;
+  created_at: string;
+};
+
+type CustomerReceipt = {
+  id: string;
+  order_id: string | null;
+  receipt_number: string;
+  amount: number;
+  payment_method: string | null;
+  payment_reference: string | null;
+  notes: string | null;
+  created_at: string;
+};
+
+type AccountView =
+  | "dashboard"
+  | "profile"
+  | "addresses"
+  | "orders"
+  | "invoices"
+  | "receipts";
 
 const emptyAddress: AddressForm = {
   full_name: "",
@@ -58,1004 +112,1326 @@ const emptyAddress: AddressForm = {
   is_default: false,
 };
 
+const inputStyle =
+  "w-full rounded-xl border border-[#eadce6] bg-white px-4 py-3 text-sm text-[#302331] placeholder:text-gray-400 outline-none focus:border-[#75436d] focus:ring-2 focus:ring-[#75436d]/10";
+
+const labelStyle = "mb-2 block text-sm font-medium text-[#43243b]";
+
+function formatMoney(amount: number, currency = "NGN") {
+  const value = Number(amount || 0);
+
+  if (currency === "NGN" || currency === "₦") {
+    return `₦${value.toLocaleString("en-NG", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`;
+  }
+
+  return `${currency} ${value.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+function formatDate(date: string | null | undefined) {
+  if (!date) return "Not available";
+
+  return new Date(date).toLocaleDateString("en-NG", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function statusStyle(status: string | null | undefined) {
+  const value = (status || "").toLowerCase();
+
+  if (
+    value.includes("paid") ||
+    value.includes("delivered") ||
+    value.includes("completed") ||
+    value.includes("confirmed")
+  ) {
+    return "bg-green-100 text-green-800";
+  }
+
+  if (
+    value.includes("pending") ||
+    value.includes("processing") ||
+    value.includes("transit")
+  ) {
+    return "bg-amber-100 text-amber-800";
+  }
+
+  if (
+    value.includes("cancelled") ||
+    value.includes("failed") ||
+    value.includes("overdue")
+  ) {
+    return "bg-red-100 text-red-800";
+  }
+
+  return "bg-gray-100 text-gray-700";
+}
+
 export default function AccountPage() {
-  const [profile, setProfile] = useState<CustomerProfile | null>(null);
-  const [form, setForm] = useState<CustomerProfile | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [editing, setEditing] = useState(false);
-  const [message, setMessage] = useState("");
+  const router = useRouter();
+
+  const [userId, setUserId] = useState("");
   const [view, setView] = useState<AccountView>("dashboard");
+  const [profile, setProfile] = useState<CustomerProfile>({
+    full_name: "",
+    username: "",
+    email: "",
+    phone: "",
+    country: "Nigeria",
+    state: "",
+    city: "",
+    delivery_address: "",
+  });
+
+  const [profileForm, setProfileForm] = useState<CustomerProfile>({
+    full_name: "",
+    username: "",
+    email: "",
+    phone: "",
+    country: "Nigeria",
+    state: "",
+    city: "",
+    delivery_address: "",
+  });
 
   const [addresses, setAddresses] = useState<CustomerAddress[]>([]);
-  const [addressesLoading, setAddressesLoading] = useState(false);
   const [addressForm, setAddressForm] = useState<AddressForm>(emptyAddress);
-  const [showAddressForm, setShowAddressForm] = useState(false);
   const [editingAddressId, setEditingAddressId] = useState<string | null>(null);
-  const [addressMessage, setAddressMessage] = useState("");
-  const [addressSaving, setAddressSaving] = useState(false);
+  const [showAddressForm, setShowAddressForm] = useState(false);
 
-  useEffect(() => {
-    async function loadAccount() {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+  const [orders, setOrders] = useState<CustomerOrder[]>([]);
+  const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
+  const [invoices, setInvoices] = useState<CustomerInvoice[]>([]);
+  const [receipts, setReceipts] = useState<CustomerReceipt[]>([]);
 
-      if (!user) {
-        window.location.href = "/login";
-        return;
-      }
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
 
-      if (!user.email_confirmed_at) {
-        await supabase.auth.signOut();
-        window.location.href = "/login";
-        return;
-      }
+  const loadAccount = useCallback(async () => {
+    setLoading(true);
+    setError("");
 
-      const { data, error } = await supabase
-        .from("customer_profiles")
-        .select("*")
-        .eq("user_id", user.id)
-        .maybeSingle();
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
 
-      if (error) {
-        console.error("Profile loading error:", error.message);
-      }
-
-      if (data) {
-        setProfile(data);
-        setForm(data);
-      }
-
-      setLoading(false);
+    if (authError || !user || !user.email_confirmed_at) {
+      router.replace("/login");
+      return;
     }
 
+    setUserId(user.id);
+
+    const { data: profileData, error: profileError } = await supabase
+      .from("customer_profiles")
+      .select(
+        "full_name, username, email, phone, country, state, city, delivery_address"
+      )
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (profileError) {
+      setError("Unable to load your profile. Please refresh the page.");
+    }
+
+    const loadedProfile: CustomerProfile = {
+      full_name: profileData?.full_name || "",
+      username: profileData?.username || "",
+      email: profileData?.email || user.email || "",
+      phone: profileData?.phone || "",
+      country: profileData?.country || "Nigeria",
+      state: profileData?.state || "",
+      city: profileData?.city || "",
+      delivery_address: profileData?.delivery_address || "",
+    };
+
+    setProfile(loadedProfile);
+    setProfileForm(loadedProfile);
+
+    const { data: addressData } = await supabase
+      .from("customer_addresses")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("is_default", { ascending: false })
+      .order("created_at", { ascending: false });
+
+    setAddresses((addressData || []) as CustomerAddress[]);
+
+    const { data: orderData, error: orderError } = await supabase
+      .from("customer_orders")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false });
+
+    if (orderError) {
+      setError("Unable to load your orders. Please refresh the page.");
+    }
+
+    const customerOrders = (orderData || []) as CustomerOrder[];
+    setOrders(customerOrders);
+
+    if (customerOrders.length > 0) {
+      const orderIds = customerOrders.map((order) => order.id);
+
+      const { data: itemData } = await supabase
+        .from("order_items")
+        .select("*")
+        .in("order_id", orderIds);
+
+      setOrderItems((itemData || []) as OrderItem[]);
+    } else {
+      setOrderItems([]);
+    }
+
+    const { data: invoiceData, error: invoiceError } = await supabase
+      .from("customer_invoices")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false });
+
+    if (invoiceError) {
+      setError("Unable to load your invoices. Please refresh the page.");
+    }
+
+    setInvoices((invoiceData || []) as CustomerInvoice[]);
+
+    const { data: receiptData, error: receiptError } = await supabase
+      .from("customer_receipts")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false });
+
+    if (receiptError) {
+      setError("Unable to load your receipts. Please refresh the page.");
+    }
+
+    setReceipts((receiptData || []) as CustomerReceipt[]);
+
+    setLoading(false);
+  }, [router]);
+
+  useEffect(() => {
     loadAccount();
-  }, []);
+  }, [loadAccount]);
 
-  function openProfile() {
-    window.history.pushState(null, "", "/account#profile");
-    setView("profile");
-    setMessage("");
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }
-
-  async function openAddresses() {
-    window.history.pushState(null, "", "/account#addresses");
-    setView("addresses");
-    setAddressMessage("");
-    setShowAddressForm(false);
-    setAddressesLoading(true);
-
-    try {
-      const {
-        data: { user },
-        error: userError,
-      } = await supabase.auth.getUser();
-
-      console.log("Logged-in user ID:", user?.id);
-      console.log("User authentication error:", userError);
-
-      if (userError || !user) {
-        setAddressMessage(
-          "Unable to identify your logged-in account. Please sign in again."
-        );
-        return;
-      }
-
-      const { data, error } = await supabase
-        .from("customer_addresses")
-        .select("*")
-        .eq("user_id", user.id)
-        .order("created_at", { ascending: false });
-
-      console.log("Address records received:", data);
-      console.log("Address loading error:", error);
-
-      if (error) {
-        setAddressMessage("Unable to load addresses: " + error.message);
-        return;
-      }
-
-      setAddresses((data || []) as CustomerAddress[]);
-
-      setAddressMessage(
-        data && data.length > 0
-          ? `Successfully loaded ${data.length} saved address(es).`
-          : "No saved addresses found for this account."
-      );
-    } catch (error) {
-      console.error("Address loading failed:", error);
-      setAddressMessage(
-        "Something went wrong while loading your addresses."
-      );
-    } finally {
-      setAddressesLoading(false);
-    }
-  }
-
-  // FIX: Automatically load saved addresses when the page opens
-  // with #addresses in the URL, including after a refresh.
   useEffect(() => {
-    function syncViewWithUrl() {
-      const hash = window.location.hash;
+    const syncHash = () => {
+      const hash = window.location.hash.replace("#", "");
 
-      if (hash === "#profile") {
-        setView("profile");
-      } else if (hash === "#addresses") {
-        openAddresses();
+      if (
+        hash === "profile" ||
+        hash === "addresses" ||
+        hash === "orders" ||
+        hash === "invoices" ||
+        hash === "receipts"
+      ) {
+        setView(hash);
       } else {
         setView("dashboard");
       }
-    }
-
-    syncViewWithUrl();
-    window.addEventListener("hashchange", syncViewWithUrl);
-
-    return () => {
-      window.removeEventListener("hashchange", syncViewWithUrl);
     };
+
+    syncHash();
+    window.addEventListener("hashchange", syncHash);
+
+    return () => window.removeEventListener("hashchange", syncHash);
   }, []);
 
-  function backToDashboard() {
-    window.location.href = "/";
-  }
-
-  function updateField(field: keyof CustomerProfile, value: string) {
-    setForm((previous) =>
-      previous ? { ...previous, [field]: value } : previous
-    );
+  function navigate(nextView: AccountView) {
+    setView(nextView);
+    window.history.replaceState(null, "", `/account${nextView === "dashboard" ? "" : `#${nextView}`}`);
+    setMessage("");
+    setError("");
   }
 
   async function saveProfile() {
-    if (!form) return;
+    if (!userId) return;
 
     setSaving(true);
     setMessage("");
+    setError("");
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      window.location.href = "/login";
-      return;
-    }
-
-    const { error } = await supabase
+    const { error: saveError } = await supabase
       .from("customer_profiles")
-      .update({
-        full_name: form.full_name,
-        phone: form.phone,
-        state: form.state,
-        city: form.city,
-        delivery_address: form.delivery_address,
-        country: form.country,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("user_id", user.id);
+      .upsert(
+        {
+          user_id: userId,
+          full_name: profileForm.full_name,
+          username: profileForm.username,
+          email: profileForm.email,
+          phone: profileForm.phone,
+          country: profileForm.country,
+          state: profileForm.state,
+          city: profileForm.city,
+          delivery_address: profileForm.delivery_address,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "user_id" }
+      );
+
+    if (saveError) {
+      setError(`Unable to save your profile: ${saveError.message}`);
+    } else {
+      setProfile(profileForm);
+      setMessage("Your profile has been updated successfully.");
+    }
 
     setSaving(false);
-
-    if (error) {
-      setMessage("Unable to save your profile: " + error.message);
-      return;
-    }
-
-    setProfile(form);
-    setEditing(false);
-    setMessage("Your profile has been updated successfully!");
   }
 
-  function startAddingAddress() {
+  function openNewAddress() {
     setAddressForm({
       ...emptyAddress,
-      full_name: profile?.full_name || "",
-      phone: profile?.phone || "",
-      country: profile?.country || "Nigeria",
-      state: profile?.state || "",
-      city: profile?.city || "",
-      delivery_address: profile?.delivery_address || "",
-      is_default: addresses.length === 0,
+      full_name: profile.full_name || "",
+      phone: profile.phone || "",
+      country: profile.country || "Nigeria",
+      state: profile.state || "",
+      city: profile.city || "",
+      delivery_address: profile.delivery_address || "",
     });
 
     setEditingAddressId(null);
-    setAddressMessage("");
     setShowAddressForm(true);
+    setMessage("");
+    setError("");
   }
 
-  function startEditingAddress(address: CustomerAddress) {
+  function openEditAddress(address: CustomerAddress) {
     setAddressForm({
-      full_name: address.full_name,
-      phone: address.phone,
-      country: address.country,
-      state: address.state,
-      city: address.city,
-      delivery_address: address.delivery_address,
+      full_name: address.full_name || "",
+      phone: address.phone || "",
+      country: address.country || "Nigeria",
+      state: address.state || "",
+      city: address.city || "",
+      delivery_address: address.delivery_address || "",
       address_label: address.address_label || "Home",
-      is_default: address.is_default,
+      is_default: address.is_default || false,
     });
 
     setEditingAddressId(address.id);
-    setAddressMessage("");
     setShowAddressForm(true);
-  }
-
-  function updateAddressField(
-    field: keyof AddressForm,
-    value: string | boolean
-  ) {
-    setAddressForm((previous) => ({
-      ...previous,
-      [field]: value,
-    }));
+    setMessage("");
+    setError("");
   }
 
   async function saveAddress() {
+    if (!userId) return;
+
     if (
-      !addressForm.full_name.trim() ||
-      !addressForm.phone.trim() ||
-      !addressForm.state.trim() ||
-      !addressForm.city.trim() ||
-      !addressForm.delivery_address.trim()
+      !addressForm.full_name ||
+      !addressForm.phone ||
+      !addressForm.state ||
+      !addressForm.city ||
+      !addressForm.delivery_address
     ) {
-      setAddressMessage("Please fill in all required address fields.");
+      setError("Please complete all required address fields.");
       return;
     }
 
-    setAddressSaving(true);
-    setAddressMessage("");
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      setAddressSaving(false);
-      window.location.href = "/login";
-      return;
-    }
+    setSaving(true);
+    setError("");
+    setMessage("");
 
     if (addressForm.is_default) {
-      const { error: defaultError } = await supabase
+      await supabase
         .from("customer_addresses")
         .update({ is_default: false })
-        .eq("user_id", user.id);
-
-      if (defaultError) {
-        setAddressMessage(defaultError.message);
-        setAddressSaving(false);
-        return;
-      }
+        .eq("user_id", userId);
     }
 
-    const addressData = {
-      full_name: addressForm.full_name.trim(),
-      phone: addressForm.phone.trim(),
-      country: addressForm.country.trim() || "Nigeria",
-      state: addressForm.state.trim(),
-      city: addressForm.city.trim(),
-      delivery_address: addressForm.delivery_address.trim(),
+    const addressPayload = {
+      user_id: userId,
+      full_name: addressForm.full_name,
+      phone: addressForm.phone,
+      country: addressForm.country,
+      state: addressForm.state,
+      city: addressForm.city,
+      delivery_address: addressForm.delivery_address,
       address_label: addressForm.address_label,
-      is_default: addressForm.is_default || addresses.length === 0,
-      updated_at: new Date().toISOString(),
+      is_default: addressForm.is_default,
     };
 
-    let error;
+    const result = editingAddressId
+      ? await supabase
+          .from("customer_addresses")
+          .update(addressPayload)
+          .eq("id", editingAddressId)
+          .eq("user_id", userId)
+      : await supabase.from("customer_addresses").insert(addressPayload);
 
-    if (editingAddressId) {
-      const result = await supabase
-        .from("customer_addresses")
-        .update(addressData)
-        .eq("id", editingAddressId)
-        .eq("user_id", user.id);
-
-      error = result.error;
+    if (result.error) {
+      setError(`Unable to save address: ${result.error.message}`);
     } else {
-      const result = await supabase
+      setMessage("Your address has been saved.");
+      setShowAddressForm(false);
+
+      const { data } = await supabase
         .from("customer_addresses")
-        .insert({
-          ...addressData,
-          user_id: user.id,
-        });
+        .select("*")
+        .eq("user_id", userId)
+        .order("is_default", { ascending: false })
+        .order("created_at", { ascending: false });
 
-      error = result.error;
+      setAddresses((data || []) as CustomerAddress[]);
     }
 
-    if (error) {
-      setAddressMessage("Unable to save address: " + error.message);
-      setAddressSaving(false);
+    setSaving(false);
+  }
+
+  async function deleteAddress(addressId: string) {
+    if (!userId || !window.confirm("Are you sure you want to delete this address?")) {
       return;
     }
 
-    await openAddressesAfterSave(user.id);
-
-    setShowAddressForm(false);
-    setEditingAddressId(null);
-    setAddressForm(emptyAddress);
-    setAddressMessage("Address saved successfully!");
-    setAddressSaving(false);
-  }
-
-  async function openAddressesAfterSave(userId: string) {
-    const { data, error } = await supabase
-      .from("customer_addresses")
-      .select("*")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false });
-
-    if (error) {
-      console.error("Unable to refresh saved addresses:", error);
-      setAddressMessage(
-        "Address saved, but refreshing the list failed: " + error.message
-      );
-      return;
-    }
-
-    setAddresses((data || []) as CustomerAddress[]);
-  }
-
-  async function deleteAddress(id: string) {
-    const confirmed = window.confirm(
-      "Are you sure you want to delete this delivery address?"
-    );
-
-    if (!confirmed) return;
-
-    const { error } = await supabase
+    const { error: deleteError } = await supabase
       .from("customer_addresses")
       .delete()
-      .eq("id", id);
+      .eq("id", addressId)
+      .eq("user_id", userId);
 
-    if (error) {
-      setAddressMessage("Unable to delete address: " + error.message);
-      return;
+    if (deleteError) {
+      setError(`Unable to delete address: ${deleteError.message}`);
+    } else {
+      setAddresses((previous) =>
+        previous.filter((address) => address.id !== addressId)
+      );
+      setMessage("Address deleted.");
     }
-
-    const remaining = addresses.filter((address) => address.id !== id);
-
-    if (
-      remaining.length > 0 &&
-      addresses.find((a) => a.id === id)?.is_default
-    ) {
-      const { error: defaultError } = await supabase
-        .from("customer_addresses")
-        .update({ is_default: true })
-        .eq("id", remaining[0].id);
-
-      if (defaultError) {
-        setAddressMessage(
-          "Address deleted, but the new default could not be set: " +
-            defaultError.message
-        );
-      } else {
-        remaining[0].is_default = true;
-      }
-    }
-
-    setAddresses(remaining);
-    setAddressMessage("Address deleted successfully.");
   }
 
-  async function setDefaultAddress(id: string) {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+  async function setDefaultAddress(addressId: string) {
+    if (!userId) return;
 
-    if (!user) {
-      window.location.href = "/login";
-      return;
-    }
-
-    const { error: clearError } = await supabase
+    await supabase
       .from("customer_addresses")
       .update({ is_default: false })
-      .eq("user_id", user.id);
+      .eq("user_id", userId);
 
-    if (clearError) {
-      setAddressMessage(clearError.message);
-      return;
-    }
-
-    const { error } = await supabase
+    const { error: updateError } = await supabase
       .from("customer_addresses")
       .update({ is_default: true })
-      .eq("id", id)
-      .eq("user_id", user.id);
+      .eq("id", addressId)
+      .eq("user_id", userId);
 
-    if (error) {
-      setAddressMessage("Unable to set default address: " + error.message);
-      return;
+    if (updateError) {
+      setError(`Unable to update default address: ${updateError.message}`);
+    } else {
+      const { data } = await supabase
+        .from("customer_addresses")
+        .select("*")
+        .eq("user_id", userId)
+        .order("is_default", { ascending: false });
+
+      setAddresses((data || []) as CustomerAddress[]);
+      setMessage("Default address updated.");
     }
-
-    setAddresses((previous) =>
-      previous.map((address) => ({
-        ...address,
-        is_default: address.id === id,
-      }))
-    );
-
-    setAddressMessage("Default address updated successfully.");
   }
 
-  async function handleLogout() {
+  async function signOut() {
     await supabase.auth.signOut();
-    window.location.href = "/login";
+    router.replace("/login");
   }
 
-  const inputStyle =
-    "mt-2 w-full rounded-lg border border-pink-200 bg-white px-4 py-3 text-sm text-gray-800 outline-none focus:border-[#bd668c]";
+  function printDocument() {
+    window.print();
+  }
+
+  function itemsForOrder(orderId: string) {
+    return orderItems.filter((item) => item.order_id === orderId);
+  }
+
+  function orderNumberFor(orderId: string | null) {
+    if (!orderId) return "Not linked to an order";
+
+    return (
+      orders.find((order) => order.id === orderId)?.order_number ||
+      "Order"
+    );
+  }
+
+  const outstandingBalance = invoices
+    .filter((invoice) => {
+      const status = (invoice.payment_status || "").toLowerCase();
+      return status !== "paid" && status !== "completed";
+    })
+    .reduce((total, invoice) => total + Number(invoice.amount || 0), 0);
+
+  const paidTotal = receipts.reduce(
+    (total, receipt) => total + Number(receipt.amount || 0),
+    0
+  );
+
+  const pageTitle: Record<AccountView, string> = {
+    dashboard: "My Account",
+    profile: "My Profile",
+    addresses: "My Addresses",
+    orders: "My Orders",
+    invoices: "My Invoices",
+    receipts: "My Receipts",
+  };
 
   if (loading) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-[#fffafc]">
-        <p className="text-[#702b50]">Loading your account...</p>
+      <main className="flex min-h-screen items-center justify-center bg-[#fff8fc] px-5">
+        <div className="text-center">
+          <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-4 border-[#eadce6] border-t-[#75436d]" />
+          <p className="text-sm text-[#43243b]">Loading your account...</p>
+        </div>
       </main>
     );
   }
 
   return (
-    <main className="min-h-screen bg-[#fffafc]">
-      <header className="border-b border-pink-100 bg-white px-5 py-5">
-        <div className="mx-auto flex max-w-6xl items-center justify-between">
-          <a href="/" className="text-xl font-bold text-[#702b50]">
-            ORAIA BY DARA
-          </a>
+    <main className="min-h-screen bg-[#fff8fc] px-4 py-8 text-[#302331] sm:px-6 lg:px-10">
+      <div className="mx-auto max-w-7xl">
+        <header className="mb-8 flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <button
+              onClick={() => router.push("/")}
+              className="mb-3 text-sm font-medium text-[#75436d] hover:underline"
+            >
+              ← Back to shopping
+            </button>
+
+            <h1 className="text-3xl font-bold text-[#43243b]">
+              {pageTitle[view]}
+            </h1>
+
+            <p className="mt-2 text-sm text-[#756574]">
+              Welcome back, {profile.full_name || profile.username || "Customer"}.
+            </p>
+          </div>
 
           <button
-            onClick={handleLogout}
-            className="rounded-lg border border-pink-200 px-4 py-2 text-sm font-medium text-[#702b50] hover:bg-pink-50"
+            onClick={signOut}
+            className="rounded-xl border border-[#eadce6] bg-white px-5 py-3 text-sm font-semibold text-[#43243b] hover:bg-[#f9edf5]"
           >
             Sign out
           </button>
-        </div>
-      </header>
+        </header>
 
-      <div className="mx-auto max-w-6xl px-5 py-10">
-        {view === "dashboard" && (
-          <>
-            <div className="mb-8">
-              <p className="text-sm text-[#702b50]">MY ACCOUNT</p>
-
-              <h1 className="mt-2 text-3xl font-bold text-gray-900">
-                Welcome, {profile?.full_name || "Customer"}!
-              </h1>
-
-              <p className="mt-2 text-gray-500">
-                Manage your Oraia by Dara shopping account.
-              </p>
-            </div>
-
-            <div className="grid gap-6 md:grid-cols-3">
-              <section className="rounded-2xl border border-pink-100 bg-white p-6">
-                <h2 className="font-semibold text-gray-900">My Orders</h2>
-                <p className="mt-2 text-sm text-gray-500">
-                  View your purchases and track your orders.
-                </p>
-                <p className="mt-5 text-sm font-medium text-[#702b50]">
-                  Coming soon
-                </p>
-              </section>
-
-              <section className="rounded-2xl border border-pink-100 bg-white p-6">
-                <h2 className="font-semibold text-gray-900">My Addresses</h2>
-                <p className="mt-2 text-sm text-gray-500">
-                  Add, edit and manage your delivery addresses.
-                </p>
-                <button
-                  type="button"
-                  onClick={openAddresses}
-                  className="mt-5 rounded-lg bg-[#702b50] px-5 py-3 text-sm font-medium text-white hover:bg-[#57203d]"
-                >
-                  Manage Addresses
-                </button>
-              </section>
-
-              <section className="rounded-2xl border border-pink-100 bg-white p-6">
-                <h2 className="font-semibold text-gray-900">My Invoices</h2>
-                <p className="mt-2 text-sm text-gray-500">
-                  View your payments and shipping invoices.
-                </p>
-                <p className="mt-5 text-sm font-medium text-[#702b50]">
-                  Coming soon
-                </p>
-              </section>
-            </div>
-
-            <section className="mt-8 rounded-2xl border border-pink-100 bg-white p-6 sm:p-8">
-              <h2 className="text-xl font-semibold text-gray-900">
-                My Profile
-              </h2>
-
-              <p className="mt-2 text-sm text-gray-500">
-                View and update your personal information, contact details
-                and delivery address.
-              </p>
-
-              <button
-                type="button"
-                onClick={openProfile}
-                className="mt-5 rounded-lg bg-[#702b50] px-6 py-3 text-sm font-medium text-white hover:bg-[#57203d]"
-              >
-                View My Profile
-              </button>
-            </section>
-          </>
+        {(message || error) && (
+          <div
+            className={`mb-6 rounded-xl px-4 py-3 text-sm ${
+              error
+                ? "border border-red-200 bg-red-50 text-red-700"
+                : "border border-green-200 bg-green-50 text-green-800"
+            }`}
+          >
+            {error || message}
+          </div>
         )}
 
-        {view === "addresses" && (
-          <section className="rounded-2xl border border-pink-100 bg-white p-6 sm:p-8">
-            <button
-              type="button"
-              onClick={() => {
-                window.history.pushState(null, "", "/account");
-                setView("dashboard");
-                setShowAddressForm(false);
-              }}
-              className="mb-6 rounded-lg border border-pink-200 px-4 py-3 text-sm font-medium text-[#702b50] hover:bg-pink-50"
-            >
-              ← Back to My Account
-            </button>
-
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <div>
-                <h1 className="text-2xl font-bold text-gray-900">
-                  My Addresses
-                </h1>
-                <p className="mt-2 text-sm text-gray-500">
-                  Manage your saved delivery addresses.
-                </p>
-              </div>
-
-              {!showAddressForm && (
-                <button
-                  onClick={startAddingAddress}
-                  className="rounded-lg bg-[#702b50] px-5 py-3 text-sm font-medium text-white hover:bg-[#57203d]"
-                >
-                  + Add New Address
-                </button>
-              )}
+        <div className="grid gap-6 lg:grid-cols-[240px_1fr]">
+          <aside className="h-fit rounded-2xl border border-[#f0e2ec] bg-white p-4 shadow-sm">
+            <div className="mb-5 rounded-xl bg-[#f9edf5] p-4">
+              <p className="text-xs font-medium uppercase tracking-wide text-[#856b80]">
+                Signed in as
+              </p>
+              <p className="mt-2 break-words text-sm font-semibold text-[#43243b]">
+                {profile.email}
+              </p>
             </div>
 
-            {addressMessage && (
-              <p className="mt-5 break-words rounded-lg bg-pink-50 p-3 text-sm text-[#702b50]">
-                {addressMessage}
-              </p>
-            )}
-
-            {addressesLoading ? (
-              <p className="mt-8 text-sm text-gray-500">
-                Loading your addresses...
-              </p>
-            ) : showAddressForm ? (
-              <div className="mt-8 rounded-xl border border-pink-100 p-5">
-                <h2 className="text-lg font-semibold text-gray-900">
-                  {editingAddressId ? "Edit Address" : "Add New Address"}
-                </h2>
-
-                <div className="mt-5 grid gap-5 sm:grid-cols-2">
-                  <div>
-                    <label className="text-sm font-medium text-gray-700">
-                      Address label
-                    </label>
-                    <select
-                      className={inputStyle}
-                      value={addressForm.address_label}
-                      onChange={(e) =>
-                        updateAddressField("address_label", e.target.value)
-                      }
-                    >
-                      <option value="Home">Home</option>
-                      <option value="Work">Work</option>
-                      <option value="Other">Other</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="text-sm font-medium text-gray-700">
-                      Full name *
-                    </label>
-                    <input
-                      className={inputStyle}
-                      value={addressForm.full_name}
-                      onChange={(e) =>
-                        updateAddressField("full_name", e.target.value)
-                      }
-                      placeholder="Recipient's full name"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-sm font-medium text-gray-700">
-                      Phone number *
-                    </label>
-                    <input
-                      className={inputStyle}
-                      value={addressForm.phone}
-                      onChange={(e) =>
-                        updateAddressField("phone", e.target.value)
-                      }
-                      placeholder="Phone number"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-sm font-medium text-gray-700">
-                      Country
-                    </label>
-                    <input
-                      className={inputStyle}
-                      value={addressForm.country}
-                      onChange={(e) =>
-                        updateAddressField("country", e.target.value)
-                      }
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-sm font-medium text-gray-700">
-                      State *
-                    </label>
-                    <input
-                      className={inputStyle}
-                      value={addressForm.state}
-                      onChange={(e) =>
-                        updateAddressField("state", e.target.value)
-                      }
-                      placeholder="State"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-sm font-medium text-gray-700">
-                      City *
-                    </label>
-                    <input
-                      className={inputStyle}
-                      value={addressForm.city}
-                      onChange={(e) =>
-                        updateAddressField("city", e.target.value)
-                      }
-                      placeholder="City"
-                    />
-                  </div>
-
-                  <div className="sm:col-span-2">
-                    <label className="text-sm font-medium text-gray-700">
-                      Delivery address *
-                    </label>
-                    <textarea
-                      className={inputStyle}
-                      rows={4}
-                      value={addressForm.delivery_address}
-                      onChange={(e) =>
-                        updateAddressField("delivery_address", e.target.value)
-                      }
-                      placeholder="House number, street, area and other details"
-                    />
-                  </div>
-
-                  <div className="sm:col-span-2">
-                    <label className="flex items-center gap-3 text-sm text-gray-700">
-                      <input
-                        type="checkbox"
-                        checked={addressForm.is_default}
-                        onChange={(e) =>
-                          updateAddressField("is_default", e.target.checked)
-                        }
-                        className="h-4 w-4 accent-[#702b50]"
-                      />
-                      Set as my default delivery address
-                    </label>
-                  </div>
-
-                  <div className="flex flex-wrap gap-3 sm:col-span-2">
-                    <button
-                      type="button"
-                      onClick={saveAddress}
-                      disabled={addressSaving}
-                      className="rounded-lg bg-[#702b50] px-6 py-3 text-sm font-medium text-white disabled:opacity-50"
-                    >
-                      {addressSaving ? "Saving..." : "Save Address"}
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowAddressForm(false);
-                        setEditingAddressId(null);
-                        setAddressMessage("");
-                      }}
-                      disabled={addressSaving}
-                      className="rounded-lg border border-pink-200 px-6 py-3 text-sm font-medium text-[#702b50]"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ) : addresses.length === 0 ? (
-              <div className="mt-8 rounded-xl border border-dashed border-pink-200 p-8 text-center">
-                <h2 className="font-semibold text-gray-900">
-                  No saved addresses yet
-                </h2>
-                <p className="mt-2 text-sm text-gray-500">
-                  Add a delivery address to make future orders easier.
-                </p>
+            <nav className="space-y-2">
+              {(
+                [
+                  ["dashboard", "Dashboard"],
+                  ["orders", "My Orders"],
+                  ["invoices", "My Invoices"],
+                  ["receipts", "My Receipts"],
+                  ["addresses", "My Addresses"],
+                  ["profile", "My Profile"],
+                ] as [AccountView, string][]
+              ).map(([key, label]) => (
                 <button
-                  onClick={startAddingAddress}
-                  className="mt-5 rounded-lg bg-[#702b50] px-6 py-3 text-sm font-medium text-white"
+                  key={key}
+                  onClick={() => navigate(key)}
+                  className={`w-full rounded-xl px-4 py-3 text-left text-sm font-medium transition ${
+                    view === key
+                      ? "bg-[#75436d] text-white"
+                      : "text-[#493a49] hover:bg-[#f9edf5]"
+                  }`}
                 >
-                  Add Your First Address
+                  {label}
                 </button>
-              </div>
-            ) : (
-              <div className="mt-8 grid gap-5 md:grid-cols-2">
-                {addresses.map((address) => (
-                  <div
-                    key={address.id}
-                    className="rounded-xl border border-pink-100 p-5"
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <h2 className="font-semibold text-gray-900">
-                        {address.address_label || "Delivery Address"}
-                      </h2>
+              ))}
+            </nav>
+          </aside>
 
-                      {address.is_default && (
-                        <span className="rounded-full bg-pink-100 px-3 py-1 text-xs font-medium text-[#702b50]">
-                          Default Address
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="mt-4 space-y-2 text-sm text-gray-600">
-                      <p className="font-medium text-gray-900">
-                        {address.full_name}
-                      </p>
-                      <p>{address.phone}</p>
-                      <p>{address.delivery_address}</p>
-                      <p>
-                        {address.city}, {address.state}
-                      </p>
-                      <p>{address.country}</p>
-                    </div>
-
-                    <div className="mt-5 flex flex-wrap gap-3">
-                      <button
-                        onClick={() => startEditingAddress(address)}
-                        className="rounded-lg border border-pink-200 px-4 py-2 text-sm font-medium text-[#702b50]"
-                      >
-                        Edit
-                      </button>
-
-                      {!address.is_default && (
-                        <button
-                          onClick={() => setDefaultAddress(address.id)}
-                          className="rounded-lg border border-pink-200 px-4 py-2 text-sm font-medium text-[#702b50]"
-                        >
-                          Set as Default
-                        </button>
-                      )}
-
-                      <button
-                        onClick={() => deleteAddress(address.id)}
-                        className="rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600"
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-        )}
-
-        {view === "profile" && (
-          <section className="rounded-2xl border border-pink-100 bg-white p-6 sm:p-8">
-            <button
-              type="button"
-              onClick={backToDashboard}
-              className="mb-6 inline-flex items-center gap-2 rounded-lg border border-pink-200 px-4 py-3 text-sm font-medium text-[#702b50] transition hover:bg-pink-50"
-            >
-              <span aria-hidden="true">←</span>
-              Back to Dashboard
-            </button>
-
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <div>
-                <h1 className="text-2xl font-bold text-gray-900">
-                  My Profile
-                </h1>
-                <p className="mt-2 text-sm text-gray-500">
-                  View and manage your personal information.
-                </p>
-              </div>
-
-              {!editing && profile && (
-                <button
-                  onClick={() => {
-                    setForm(profile);
-                    setEditing(true);
-                    setMessage("");
-                  }}
-                  className="rounded-lg bg-[#702b50] px-5 py-3 text-sm font-medium text-white hover:bg-[#57203d]"
-                >
-                  Edit Profile
-                </button>
-              )}
-            </div>
-
-            {message && (
-              <p className="mt-5 rounded-lg bg-pink-50 p-3 text-sm text-[#702b50]">
-                {message}
-              </p>
-            )}
-
-            {form ? (
-              editing ? (
-                <div className="mt-6 grid gap-5 sm:grid-cols-2">
-                  <div>
-                    <label className="text-sm font-medium text-gray-700">
-                      Full name
-                    </label>
-                    <input
-                      className={inputStyle}
-                      value={form.full_name || ""}
-                      onChange={(e) =>
-                        updateField("full_name", e.target.value)
-                      }
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-sm font-medium text-gray-700">
-                      Username
-                    </label>
-                    <input
-                      className={`${inputStyle} bg-gray-100`}
-                      value={form.username || ""}
-                      disabled
-                    />
-                    <p className="mt-1 text-xs text-gray-400">
-                      Username cannot be changed here.
-                    </p>
-                  </div>
-
-                  <div>
-                    <label className="text-sm font-medium text-gray-700">
-                      Email address
-                    </label>
-                    <input
-                      className={`${inputStyle} bg-gray-100`}
-                      value={form.email || ""}
-                      disabled
-                    />
-                    <p className="mt-1 text-xs text-gray-400">
-                      Email cannot be changed here.
-                    </p>
-                  </div>
-
-                  <div>
-                    <label className="text-sm font-medium text-gray-700">
-                      Phone number
-                    </label>
-                    <input
-                      className={inputStyle}
-                      value={form.phone || ""}
-                      onChange={(e) =>
-                        updateField("phone", e.target.value)
-                      }
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-sm font-medium text-gray-700">
-                      Country
-                    </label>
-                    <input
-                      className={`${inputStyle} bg-gray-100`}
-                      value={form.country || "Nigeria"}
-                      disabled
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-sm font-medium text-gray-700">
-                      State
-                    </label>
-                    <input
-                      className={inputStyle}
-                      value={form.state || ""}
-                      onChange={(e) =>
-                        updateField("state", e.target.value)
-                      }
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-sm font-medium text-gray-700">
-                      City
-                    </label>
-                    <input
-                      className={inputStyle}
-                      value={form.city || ""}
-                      onChange={(e) =>
-                        updateField("city", e.target.value)
-                      }
-                    />
-                  </div>
-
-                  <div className="sm:col-span-2">
-                    <label className="text-sm font-medium text-gray-700">
-                      Delivery address
-                    </label>
-                    <textarea
-                      className={inputStyle}
-                      rows={4}
-                      value={form.delivery_address || ""}
-                      onChange={(e) =>
-                        updateField("delivery_address", e.target.value)
-                      }
-                    />
-                  </div>
-
-                  <div className="flex flex-wrap gap-3 sm:col-span-2">
-                    <button
-                      onClick={saveProfile}
-                      disabled={saving}
-                      className="rounded-lg bg-[#702b50] px-6 py-3 text-sm font-medium text-white disabled:opacity-50"
-                    >
-                      {saving ? "Saving..." : "Save Changes"}
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        setForm(profile);
-                        setEditing(false);
-                        setMessage("");
-                      }}
-                      disabled={saving}
-                      className="rounded-lg border border-pink-200 px-6 py-3 text-sm font-medium text-[#702b50]"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              ) : profile ? (
-                <div className="mt-6 grid gap-5 sm:grid-cols-2">
+          <section className="min-w-0">
+            {view === "dashboard" && (
+              <div className="space-y-6">
+                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                   {[
-                    ["Full name", profile.full_name],
-                    ["Username", profile.username],
-                    ["Email address", profile.email],
-                    ["Phone number", profile.phone],
-                    ["Country", profile.country],
-                    ["State", profile.state],
-                    ["City", profile.city],
-                    ["Delivery address", profile.delivery_address],
-                  ].map(([label, value]) => (
-                    <div key={label}>
-                      <p className="text-xs font-medium uppercase text-gray-400">
-                        {label}
+                    {
+                      label: "Total Orders",
+                      value: orders.length,
+                      action: "orders" as AccountView,
+                    },
+                    {
+                      label: "Invoices",
+                      value: invoices.length,
+                      action: "invoices" as AccountView,
+                    },
+                    {
+                      label: "Receipts",
+                      value: receipts.length,
+                      action: "receipts" as AccountView,
+                    },
+                    {
+                      label: "Saved Addresses",
+                      value: addresses.length,
+                      action: "addresses" as AccountView,
+                    },
+                  ].map((item) => (
+                    <button
+                      key={item.label}
+                      onClick={() => navigate(item.action)}
+                      className="rounded-2xl border border-[#f0e2ec] bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+                    >
+                      <p className="text-sm text-[#756574]">{item.label}</p>
+                      <p className="mt-3 text-3xl font-bold text-[#43243b]">
+                        {item.value}
                       </p>
-                      <p className="mt-2 break-words text-sm text-gray-800">
-                        {value || "Not provided"}
+                      <p className="mt-3 text-xs font-semibold text-[#75436d]">
+                        View details →
                       </p>
-                    </div>
+                    </button>
                   ))}
                 </div>
-              ) : (
-                <p className="mt-5 text-sm text-gray-500">
-                  Your profile could not be loaded. Please refresh the page.
-                </p>
-              )
-            ) : (
-              <p className="mt-5 text-sm text-gray-500">
-                Your profile could not be loaded. Please refresh the page.
-              </p>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="rounded-2xl border border-[#f0e2ec] bg-white p-6 shadow-sm">
+                    <p className="text-sm text-[#756574]">
+                      Outstanding Invoice Balance
+                    </p>
+                    <p className="mt-3 text-2xl font-bold text-[#43243b]">
+                      {formatMoney(outstandingBalance)}
+                    </p>
+                    <button
+                      onClick={() => navigate("invoices")}
+                      className="mt-4 text-sm font-semibold text-[#75436d] hover:underline"
+                    >
+                      View invoices →
+                    </button>
+                  </div>
+
+                  <div className="rounded-2xl border border-[#f0e2ec] bg-white p-6 shadow-sm">
+                    <p className="text-sm text-[#756574]">
+                      Total Payments Recorded
+                    </p>
+                    <p className="mt-3 text-2xl font-bold text-[#43243b]">
+                      {formatMoney(paidTotal)}
+                    </p>
+                    <button
+                      onClick={() => navigate("receipts")}
+                      className="mt-4 text-sm font-semibold text-[#75436d] hover:underline"
+                    >
+                      View receipts →
+                    </button>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-[#f0e2ec] bg-white p-6 shadow-sm">
+                  <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                    <h2 className="text-lg font-bold text-[#43243b]">
+                      Recent Orders
+                    </h2>
+                    <button
+                      onClick={() => navigate("orders")}
+                      className="text-sm font-semibold text-[#75436d] hover:underline"
+                    >
+                      View all orders →
+                    </button>
+                  </div>
+
+                  {orders.length === 0 ? (
+                    <p className="rounded-xl bg-[#fff8fc] p-5 text-sm text-[#756574]">
+                      You have no orders yet.
+                    </p>
+                  ) : (
+                    <div className="space-y-3">
+                      {orders.slice(0, 3).map((order) => (
+                        <div
+                          key={order.id}
+                          className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#f0e2ec] p-4"
+                        >
+                          <div>
+                            <p className="font-semibold text-[#43243b]">
+                              {order.order_number}
+                            </p>
+                            <p className="mt-1 text-xs text-[#756574]">
+                              {formatDate(order.created_at)}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <p className="font-semibold text-[#43243b]">
+                              {formatMoney(order.total_amount, order.currency || "NGN")}
+                            </p>
+                            <span
+                              className={`mt-2 inline-block rounded-full px-3 py-1 text-xs font-medium ${statusStyle(
+                                order.order_status
+                              )}`}
+                            >
+                              {order.order_status || "Pending"}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {view === "profile" && (
+              <div className="rounded-2xl border border-[#f0e2ec] bg-white p-6 shadow-sm sm:p-8">
+                <h2 className="mb-6 text-xl font-bold text-[#43243b]">
+                  Personal Information
+                </h2>
+
+                <div className="grid gap-5 sm:grid-cols-2">
+                  <div>
+                    <label className={labelStyle}>Full Name</label>
+                    <input
+                      className={inputStyle}
+                      value={profileForm.full_name || ""}
+                      onChange={(e) =>
+                        setProfileForm({
+                          ...profileForm,
+                          full_name: e.target.value,
+                        })
+                      }
+                      placeholder="Enter your full name"
+                    />
+                  </div>
+
+                  <div>
+                    <label className={labelStyle}>Username</label>
+                    <input
+                      className={`${inputStyle} bg-gray-50`}
+                      value={profileForm.username || ""}
+                      disabled
+                    />
+                  </div>
+
+                  <div>
+                    <label className={labelStyle}>Email Address</label>
+                    <input
+                      className={`${inputStyle} bg-gray-50`}
+                      value={profileForm.email || ""}
+                      disabled
+                    />
+                  </div>
+
+                  <div>
+                    <label className={labelStyle}>Phone Number</label>
+                    <input
+                      className={inputStyle}
+                      value={profileForm.phone || ""}
+                      onChange={(e) =>
+                        setProfileForm({
+                          ...profileForm,
+                          phone: e.target.value,
+                        })
+                      }
+                      placeholder="Enter your phone number"
+                    />
+                  </div>
+
+                  <div>
+                    <label className={labelStyle}>Country</label>
+                    <input
+                      className={inputStyle}
+                      value={profileForm.country || ""}
+                      onChange={(e) =>
+                        setProfileForm({
+                          ...profileForm,
+                          country: e.target.value,
+                        })
+                      }
+                    />
+                  </div>
+
+                  <div>
+                    <label className={labelStyle}>State</label>
+                    <input
+                      className={inputStyle}
+                      value={profileForm.state || ""}
+                      onChange={(e) =>
+                        setProfileForm({
+                          ...profileForm,
+                          state: e.target.value,
+                        })
+                      }
+                      placeholder="Enter your state"
+                    />
+                  </div>
+
+                  <div>
+                    <label className={labelStyle}>City</label>
+                    <input
+                      className={inputStyle}
+                      value={profileForm.city || ""}
+                      onChange={(e) =>
+                        setProfileForm({
+                          ...profileForm,
+                          city: e.target.value,
+                        })
+                      }
+                      placeholder="Enter your city"
+                    />
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label className={labelStyle}>Delivery Address</label>
+                    <textarea
+                      className={inputStyle}
+                      rows={3}
+                      value={profileForm.delivery_address || ""}
+                      onChange={(e) =>
+                        setProfileForm({
+                          ...profileForm,
+                          delivery_address: e.target.value,
+                        })
+                      }
+                      placeholder="Enter your delivery address"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  onClick={saveProfile}
+                  disabled={saving}
+                  className="mt-6 rounded-xl bg-[#75436d] px-6 py-3 text-sm font-semibold text-white hover:bg-[#603657] disabled:opacity-60"
+                >
+                  {saving ? "Saving..." : "Save Changes"}
+                </button>
+              </div>
+            )}
+
+            {view === "addresses" && (
+              <div className="space-y-5">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-xl font-bold text-[#43243b]">
+                      Saved Addresses
+                    </h2>
+                    <p className="mt-1 text-sm text-[#756574]">
+                      Manage your delivery addresses.
+                    </p>
+                  </div>
+
+                  {!showAddressForm && (
+                    <button
+                      onClick={openNewAddress}
+                      className="rounded-xl bg-[#75436d] px-5 py-3 text-sm font-semibold text-white hover:bg-[#603657]"
+                    >
+                      Add New Address
+                    </button>
+                  )}
+                </div>
+
+                {showAddressForm && (
+                  <div className="rounded-2xl border border-[#f0e2ec] bg-white p-6 shadow-sm">
+                    <h3 className="mb-5 font-bold text-[#43243b]">
+                      {editingAddressId ? "Edit Address" : "Add New Address"}
+                    </h3>
+
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      {(
+                        [
+                          ["full_name", "Full Name"],
+                          ["phone", "Phone Number"],
+                          ["country", "Country"],
+                          ["state", "State"],
+                          ["city", "City"],
+                          ["address_label", "Address Label"],
+                        ] as [keyof AddressForm, string][]
+                      ).map(([key, label]) => (
+                        <div key={key}>
+                          <label className={labelStyle}>{label}</label>
+                          <input
+                            className={inputStyle}
+                            value={String(addressForm[key] ?? "")}
+                            onChange={(e) =>
+                              setAddressForm({
+                                ...addressForm,
+                                [key]: e.target.value,
+                              })
+                            }
+                          />
+                        </div>
+                      ))}
+
+                      <div className="sm:col-span-2">
+                        <label className={labelStyle}>Full Delivery Address</label>
+                        <textarea
+                          className={inputStyle}
+                          rows={3}
+                          value={addressForm.delivery_address}
+                          onChange={(e) =>
+                            setAddressForm({
+                              ...addressForm,
+                              delivery_address: e.target.value,
+                            })
+                          }
+                          placeholder="House number, street, area and other details"
+                        />
+                      </div>
+
+                      <label className="flex items-center gap-3 text-sm text-[#43243b] sm:col-span-2">
+                        <input
+                          type="checkbox"
+                          checked={addressForm.is_default}
+                          onChange={(e) =>
+                            setAddressForm({
+                              ...addressForm,
+                              is_default: e.target.checked,
+                            })
+                          }
+                          className="h-4 w-4 accent-[#75436d]"
+                        />
+                        Set as my default delivery address
+                      </label>
+                    </div>
+
+                    <div className="mt-6 flex flex-wrap gap-3">
+                      <button
+                        onClick={saveAddress}
+                        disabled={saving}
+                        className="rounded-xl bg-[#75436d] px-6 py-3 text-sm font-semibold text-white hover:bg-[#603657] disabled:opacity-60"
+                      >
+                        {saving ? "Saving..." : "Save Address"}
+                      </button>
+
+                      <button
+                        onClick={() => setShowAddressForm(false)}
+                        className="rounded-xl border border-[#eadce6] px-6 py-3 text-sm font-semibold text-[#43243b]"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {addresses.length === 0 && !showAddressForm ? (
+                  <div className="rounded-2xl border border-[#f0e2ec] bg-white p-8 text-center">
+                    <p className="font-semibold text-[#43243b]">
+                      No saved addresses yet
+                    </p>
+                    <p className="mt-2 text-sm text-[#756574]">
+                      Add an address to make delivery easier.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid gap-4 md:grid-cols-2">
+                    {addresses.map((address) => (
+                      <div
+                        key={address.id}
+                        className="rounded-2xl border border-[#f0e2ec] bg-white p-5 shadow-sm"
+                      >
+                        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                          <h3 className="font-bold text-[#43243b]">
+                            {address.address_label || "Delivery Address"}
+                          </h3>
+
+                          {address.is_default && (
+                            <span className="rounded-full bg-[#f9edf5] px-3 py-1 text-xs font-semibold text-[#75436d]">
+                              Default
+                            </span>
+                          )}
+                        </div>
+
+                        <p className="font-medium text-[#302331]">
+                          {address.full_name}
+                        </p>
+                        <p className="mt-1 text-sm text-[#756574]">
+                          {address.phone}
+                        </p>
+                        <p className="mt-3 text-sm leading-6 text-[#493a49]">
+                          {address.delivery_address}
+                          <br />
+                          {address.city}, {address.state}
+                          <br />
+                          {address.country}
+                        </p>
+
+                        <div className="mt-5 flex flex-wrap gap-3 border-t border-[#f0e2ec] pt-4">
+                          <button
+                            onClick={() => openEditAddress(address)}
+                            className="text-sm font-semibold text-[#75436d] hover:underline"
+                          >
+                            Edit
+                          </button>
+
+                          <button
+                            onClick={() => deleteAddress(address.id)}
+                            className="text-sm font-semibold text-red-600 hover:underline"
+                          >
+                            Delete
+                          </button>
+
+                          {!address.is_default && (
+                            <button
+                              onClick={() => setDefaultAddress(address.id)}
+                              className="text-sm font-semibold text-[#75436d] hover:underline"
+                            >
+                              Make Default
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {view === "orders" && (
+              <div className="space-y-5">
+                <div>
+                  <h2 className="text-xl font-bold text-[#43243b]">
+                    My Orders
+                  </h2>
+                  <p className="mt-1 text-sm text-[#756574]">
+                    View your orders, payment information and delivery progress.
+                  </p>
+                </div>
+
+                {orders.length === 0 ? (
+                  <div className="rounded-2xl border border-[#f0e2ec] bg-white p-8 text-center">
+                    <p className="font-semibold text-[#43243b]">
+                      No orders yet
+                    </p>
+                    <p className="mt-2 text-sm text-[#756574]">
+                      Your orders will appear here after they are created.
+                    </p>
+                    <button
+                      onClick={() => router.push("/")}
+                      className="mt-5 rounded-xl bg-[#75436d] px-5 py-3 text-sm font-semibold text-white"
+                    >
+                      Start Shopping
+                    </button>
+                  </div>
+                ) : (
+                  orders.map((order) => (
+                    <article
+                      key={order.id}
+                      className="rounded-2xl border border-[#f0e2ec] bg-white p-5 shadow-sm sm:p-6"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-[#f0e2ec] pb-4">
+                        <div>
+                          <p className="text-xs text-[#756574]">Order Number</p>
+                          <h3 className="mt-1 font-bold text-[#43243b]">
+                            {order.order_number}
+                          </h3>
+                          <p className="mt-1 text-xs text-[#756574]">
+                            Placed {formatDate(order.created_at)}
+                          </p>
+                        </div>
+
+                        <div className="flex flex-wrap gap-2">
+                          <span
+                            className={`rounded-full px-3 py-1 text-xs font-semibold ${statusStyle(
+                              order.order_status
+                            )}`}
+                          >
+                            {order.order_status || "Pending"}
+                          </span>
+                          <span
+                            className={`rounded-full px-3 py-1 text-xs font-semibold ${statusStyle(
+                              order.payment_status
+                            )}`}
+                          >
+                            {order.payment_status || "Payment pending"}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3 py-4">
+                        {itemsForOrder(order.id).length === 0 ? (
+                          <p className="text-sm text-[#756574]">
+                            Order items will appear here.
+                          </p>
+                        ) : (
+                          itemsForOrder(order.id).map((item) => (
+                            <div
+                              key={item.id}
+                              className="flex items-center gap-3"
+                            >
+                              {item.product_image ? (
+                                <img
+                                  src={item.product_image}
+                                  alt={item.product_name}
+                                  className="h-14 w-14 rounded-lg border border-[#f0e2ec] object-cover"
+                                />
+                              ) : (
+                                <div className="flex h-14 w-14 items-center justify-center rounded-lg bg-[#f9edf5] text-xs text-[#75436d]">
+                                  Oraia
+                                </div>
+                              )}
+
+                              <div className="min-w-0 flex-1">
+                                <p className="text-sm font-semibold text-[#43243b]">
+                                  {item.product_name}
+                                </p>
+                                <p className="mt-1 text-xs text-[#756574]">
+                                  Qty: {item.quantity}
+                                </p>
+                              </div>
+
+                              <p className="text-sm font-semibold text-[#43243b]">
+                                {formatMoney(
+                                  item.total_price,
+                                  order.currency || "NGN"
+                                )}
+                              </p>
+                            </div>
+                          ))
+                        )}
+                      </div>
+
+                      <div className="grid gap-4 border-t border-[#f0e2ec] pt-4 sm:grid-cols-2">
+                        <div>
+                          <p className="text-xs text-[#756574]">Order Total</p>
+                          <p className="mt-1 text-lg font-bold text-[#43243b]">
+                            {formatMoney(
+                              order.total_amount,
+                              order.currency || "NGN"
+                            )}
+                          </p>
+                        </div>
+
+                        <div>
+                          <p className="text-xs text-[#756574]">Shipping Status</p>
+                          <p className="mt-1 font-semibold text-[#43243b]">
+                            {order.shipping_status || "Not shipped"}
+                          </p>
+                        </div>
+
+                        <div>
+                          <p className="text-xs text-[#756574]">Shipping Carrier</p>
+                          <p className="mt-1 text-sm font-medium text-[#43243b]">
+                            {order.shipping_carrier || "Not yet assigned"}
+                          </p>
+                        </div>
+
+                        <div>
+                          <p className="text-xs text-[#756574]">Tracking Number</p>
+                          <p className="mt-1 break-all text-sm font-medium text-[#43243b]">
+                            {order.tracking_number || "Not yet available"}
+                          </p>
+                        </div>
+                      </div>
+
+                      {order.shipping_notes && (
+                        <div className="mt-4 rounded-xl bg-[#fff8fc] p-4">
+                          <p className="text-xs font-semibold text-[#75436d]">
+                            Delivery Update
+                          </p>
+                          <p className="mt-1 text-sm leading-6 text-[#493a49]">
+                            {order.shipping_notes}
+                          </p>
+                        </div>
+                      )}
+                    </article>
+                  ))
+                )}
+              </div>
+            )}
+
+            {view === "invoices" && (
+              <div className="space-y-5">
+                <div>
+                  <h2 className="text-xl font-bold text-[#43243b]">
+                    My Invoices
+                  </h2>
+                  <p className="mt-1 text-sm text-[#756574]">
+                    View your invoices and payment status.
+                  </p>
+                </div>
+
+                {invoices.length === 0 ? (
+                  <div className="rounded-2xl border border-[#f0e2ec] bg-white p-8 text-center">
+                    <p className="font-semibold text-[#43243b]">
+                      No invoices available
+                    </p>
+                    <p className="mt-2 text-sm text-[#756574]">
+                      Invoices created for your orders will appear here.
+                    </p>
+                  </div>
+                ) : (
+                  invoices.map((invoice) => (
+                    <article
+                      key={invoice.id}
+                      className="rounded-2xl border border-[#f0e2ec] bg-white p-5 shadow-sm"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className="text-xs text-[#756574]">Invoice Number</p>
+                          <h3 className="mt-1 font-bold text-[#43243b]">
+                            {invoice.invoice_number}
+                          </h3>
+                          <p className="mt-1 text-xs text-[#756574]">
+                            Created {formatDate(invoice.created_at)}
+                          </p>
+                        </div>
+
+                        <span
+                          className={`rounded-full px-3 py-1 text-xs font-semibold ${statusStyle(
+                            invoice.payment_status
+                          )}`}
+                        >
+                          {invoice.payment_status}
+                        </span>
+                      </div>
+
+                      <div className="mt-5 grid gap-4 border-t border-[#f0e2ec] pt-4 sm:grid-cols-2">
+                        <div>
+                          <p className="text-xs text-[#756574]">Invoice Type</p>
+                          <p className="mt-1 text-sm font-semibold text-[#43243b]">
+                            {invoice.invoice_type || "Order Invoice"}
+                          </p>
+                        </div>
+
+                        <div>
+                          <p className="text-xs text-[#756574]">Related Order</p>
+                          <p className="mt-1 text-sm font-semibold text-[#43243b]">
+                            {orderNumberFor(invoice.order_id)}
+                          </p>
+                        </div>
+
+                        <div>
+                          <p className="text-xs text-[#756574]">Due Date</p>
+                          <p className="mt-1 text-sm font-semibold text-[#43243b]">
+                            {formatDate(invoice.due_date)}
+                          </p>
+                        </div>
+
+                        <div>
+                          <p className="text-xs text-[#756574]">Invoice Amount</p>
+                          <p className="mt-1 text-lg font-bold text-[#43243b]">
+                            {formatMoney(invoice.amount)}
+                          </p>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={printDocument}
+                        className="mt-5 rounded-xl border border-[#75436d] px-5 py-2.5 text-sm font-semibold text-[#75436d] hover:bg-[#f9edf5]"
+                      >
+                        Print / Save Invoice
+                      </button>
+                    </article>
+                  ))
+                )}
+              </div>
+            )}
+
+            {view === "receipts" && (
+              <div className="space-y-5">
+                <div>
+                  <h2 className="text-xl font-bold text-[#43243b]">
+                    My Payment Receipts
+                  </h2>
+                  <p className="mt-1 text-sm text-[#756574]">
+                    View receipts for payments recorded by Oraia by Dara.
+                  </p>
+                </div>
+
+                {receipts.length === 0 ? (
+                  <div className="rounded-2xl border border-[#f0e2ec] bg-white p-8 text-center">
+                    <p className="font-semibold text-[#43243b]">
+                      No receipts available
+                    </p>
+                    <p className="mt-2 text-sm text-[#756574]">
+                      Your payment receipts will appear here once your payments
+                      have been confirmed.
+                    </p>
+                  </div>
+                ) : (
+                  receipts.map((receipt) => (
+                    <article
+                      key={receipt.id}
+                      className="rounded-2xl border border-[#f0e2ec] bg-white p-5 shadow-sm"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className="text-xs text-[#756574]">Receipt Number</p>
+                          <h3 className="mt-1 font-bold text-[#43243b]">
+                            {receipt.receipt_number}
+                          </h3>
+                          <p className="mt-1 text-xs text-[#756574]">
+                            Payment date: {formatDate(receipt.created_at)}
+                          </p>
+                        </div>
+
+                        <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-semibold text-green-800">
+                          Payment Received
+                        </span>
+                      </div>
+
+                      <div className="mt-5 grid gap-4 border-t border-[#f0e2ec] pt-4 sm:grid-cols-2">
+                        <div>
+                          <p className="text-xs text-[#756574]">Related Order</p>
+                          <p className="mt-1 text-sm font-semibold text-[#43243b]">
+                            {orderNumberFor(receipt.order_id)}
+                          </p>
+                        </div>
+
+                        <div>
+                          <p className="text-xs text-[#756574]">Payment Method</p>
+                          <p className="mt-1 text-sm font-semibold text-[#43243b]">
+                            {receipt.payment_method || "Not specified"}
+                          </p>
+                        </div>
+
+                        <div>
+                          <p className="text-xs text-[#756574]">Payment Reference</p>
+                          <p className="mt-1 break-all text-sm font-semibold text-[#43243b]">
+                            {receipt.payment_reference || "Not provided"}
+                          </p>
+                        </div>
+
+                        <div>
+                          <p className="text-xs text-[#756574]">Amount Paid</p>
+                          <p className="mt-1 text-lg font-bold text-[#43243b]">
+                            {formatMoney(receipt.amount)}
+                          </p>
+                        </div>
+                      </div>
+
+                      {receipt.notes && (
+                        <p className="mt-4 rounded-xl bg-[#fff8fc] p-3 text-sm text-[#493a49]">
+                          {receipt.notes}
+                        </p>
+                      )}
+
+                      <button
+                        onClick={printDocument}
+                        className="mt-5 rounded-xl border border-[#75436d] px-5 py-2.5 text-sm font-semibold text-[#75436d] hover:bg-[#f9edf5]"
+                      >
+                        Print / Save Receipt
+                      </button>
+                    </article>
+                  ))
+                )}
+              </div>
             )}
           </section>
-        )}
+        </div>
       </div>
     </main>
   );
