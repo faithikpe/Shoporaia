@@ -10,6 +10,8 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
+const WHATSAPP_NUMBER = "2349043423379";
+
 type Product = {
   id: string;
   name: string;
@@ -20,6 +22,11 @@ type Product = {
   stock: boolean;
   isNew: boolean;
   created_at: string;
+};
+
+type CartItem = {
+  productId: string;
+  quantity: number;
 };
 
 const categories = [
@@ -43,9 +50,13 @@ function formatPrice(price: number) {
 function ProductCard({
   product,
   onAdd,
+  isWishlisted,
+  onToggleWishlist,
 }: {
   product: Product;
   onAdd: () => void;
+  isWishlisted: boolean;
+  onToggleWishlist: () => void;
 }) {
   return (
     <article className="overflow-hidden rounded-2xl border border-pink-100 bg-white">
@@ -73,23 +84,38 @@ function ProductCard({
         </span>
 
         {product.isNew && (
-          <span className="absolute right-3 top-3 rounded-full bg-[#f9eef3] px-3 py-2 text-[10px] font-semibold text-[#40253f]">
+          <span className="absolute right-14 top-3 rounded-full bg-[#f9eef3] px-3 py-2 text-[10px] font-semibold text-[#40253f]">
             NEW
           </span>
         )}
+
+        <button
+          type="button"
+          onClick={onToggleWishlist}
+          aria-label={isWishlisted ? "Remove from wishlist" : "Add to wishlist"}
+          className="absolute right-3 top-3 flex h-9 w-9 items-center justify-center rounded-full bg-white text-xl shadow-sm transition hover:scale-110"
+        >
+          <span className={isWishlisted ? "text-pink-600" : "text-gray-500"}>
+            {isWishlisted ? "♥" : "♡"}
+          </span>
+        </button>
       </div>
 
       <div className="p-4">
         <p className="text-xs text-gray-400">{product.category}</p>
+
         <h3 className="mt-2 min-h-10 text-sm font-semibold text-[#40253f]">
           {product.name}
         </h3>
+
         <p className="mt-2 font-semibold text-[#40253f]">
           {formatPrice(product.price)}
         </p>
+
         <p className="mt-1 text-xs text-gray-500">{product.origin}</p>
 
         <button
+          type="button"
           onClick={onAdd}
           className="mt-4 w-full rounded-full bg-[#40253f] px-3 py-3 text-xs font-medium text-white transition hover:bg-[#70466b]"
         >
@@ -106,14 +132,66 @@ export default function Home() {
   const [products, setProducts] = useState<Product[]>([]);
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("All");
-  const [cart, setCart] = useState(0);
+
+  const [cart, setCart] = useState<CartItem[]>([]);
+  const [wishlist, setWishlist] = useState<string[]>([]);
+  const [storageLoaded, setStorageLoaded] = useState(false);
+
+  const [showCart, setShowCart] = useState(false);
+  const [showWishlist, setShowWishlist] = useState(false);
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [user, setUser] = useState<any>(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [accountDropdown, setAccountDropdown] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [checkingOut, setCheckingOut] = useState(false);
+  const [checkoutError, setCheckoutError] = useState("");
 
+  // Load saved cart and wishlist
+  useEffect(() => {
+    try {
+      const savedCart = localStorage.getItem("oraia_cart");
+      const savedWishlist = localStorage.getItem("oraia_wishlist");
+
+      if (savedCart) {
+        const parsedCart = JSON.parse(savedCart);
+
+        if (Array.isArray(parsedCart)) {
+          setCart(parsedCart);
+        }
+      }
+
+      if (savedWishlist) {
+        const parsedWishlist = JSON.parse(savedWishlist);
+
+        if (Array.isArray(parsedWishlist)) {
+          setWishlist(parsedWishlist);
+        }
+      }
+    } catch {
+      setCart([]);
+      setWishlist([]);
+    }
+
+    setStorageLoaded(true);
+  }, []);
+
+  // Save cart and wishlist
+  useEffect(() => {
+    if (!storageLoaded) return;
+
+    localStorage.setItem("oraia_cart", JSON.stringify(cart));
+  }, [cart, storageLoaded]);
+
+  useEffect(() => {
+    if (!storageLoaded) return;
+
+    localStorage.setItem("oraia_wishlist", JSON.stringify(wishlist));
+  }, [wishlist, storageLoaded]);
+
+  // Check logged-in customer
   useEffect(() => {
     async function checkUser() {
       const {
@@ -149,12 +227,15 @@ export default function Home() {
 
     setAccountDropdown(false);
     setUser(null);
-    setCart(0);
+
+    // Keep the customer's saved cart and wishlist
     router.push("/");
     router.refresh();
+
     setLoggingOut(false);
   }
 
+  // Load products from Supabase
   async function loadProducts() {
     setLoading(true);
     setError("");
@@ -221,6 +302,184 @@ export default function Home() {
     loadProducts();
   }, []);
 
+  // Cart calculations
+  const cartProducts = cart
+    .map((item) => {
+      const product = products.find(
+        (product) => product.id === item.productId
+      );
+
+      return product
+        ? { ...product, quantity: item.quantity }
+        : null;
+    })
+    .filter((item): item is Product & { quantity: number } => item !== null);
+
+  const cartCount = cart.reduce(
+    (total, item) => total + item.quantity,
+    0
+  );
+
+  const cartTotal = cartProducts.reduce(
+    (total, item) => total + item.price * item.quantity,
+    0
+  );
+
+  const wishlistProducts = products.filter((product) =>
+    wishlist.includes(product.id)
+  );
+
+  function addToBag(product: Product) {
+    setCart((previous) => {
+      const existing = previous.find(
+        (item) => item.productId === product.id
+      );
+
+      if (existing) {
+        return previous.map((item) =>
+          item.productId === product.id
+            ? { ...item, quantity: item.quantity + 1 }
+            : item
+        );
+      }
+
+      return [
+        ...previous,
+        { productId: product.id, quantity: 1 },
+      ];
+    });
+
+    setCheckoutError("");
+    setShowWishlist(false);
+    setShowCart(true);
+  }
+
+  function changeQuantity(productId: string, amount: number) {
+    setCart((previous) =>
+      previous
+        .map((item) =>
+          item.productId === productId
+            ? { ...item, quantity: item.quantity + amount }
+            : item
+        )
+        .filter((item) => item.quantity > 0)
+    );
+  }
+
+  function removeFromCart(productId: string) {
+    setCart((previous) =>
+      previous.filter((item) => item.productId !== productId)
+    );
+  }
+
+  function toggleWishlist(productId: string) {
+    setWishlist((previous) =>
+      previous.includes(productId)
+        ? previous.filter((id) => id !== productId)
+        : [...previous, productId]
+    );
+  }
+
+  function moveWishlistItemToCart(productId: string) {
+    const product = products.find((item) => item.id === productId);
+
+    if (!product) return;
+
+    addToBag(product);
+    toggleWishlist(productId);
+  }
+
+  // Submit order to Supabase and continue to WhatsApp
+  async function handleCheckout() {
+    setCheckoutError("");
+
+    if (cartProducts.length === 0) {
+      setCheckoutError("Your shopping bag is empty.");
+      return;
+    }
+
+    if (!user) {
+      localStorage.setItem("oraia_return_to_checkout", "true");
+      router.push("/login");
+      return;
+    }
+
+    setCheckingOut(true);
+
+    try {
+      const orderNumber = `ORA-${Date.now()}`;
+
+      const { data: order, error: orderError } = await supabase
+        .from("customer_orders")
+        .insert({
+          user_id: user.id,
+          order_number: orderNumber,
+          order_status: "Pending confirmation",
+          payment_status: "Unpaid",
+          subtotal: cartTotal,
+          total_amount: cartTotal,
+          currency: "NGN",
+          shipping_status: "Not shipped",
+        })
+        .select("id, order_number")
+        .single();
+
+      if (orderError) throw orderError;
+
+      const orderItems = cartProducts.map((product) => ({
+        order_id: order.id,
+        product_name: product.name,
+        product_image: product.image || null,
+        quantity: product.quantity,
+        unit_price: product.price,
+        total_price: product.price * product.quantity,
+      }));
+
+      const { error: itemsError } = await supabase
+        .from("order_items")
+        .insert(orderItems);
+
+      if (itemsError) throw itemsError;
+
+      const messageLines = [
+        "Hello Oraia by Dara! I would like to place an order.",
+        "",
+        `Order number: ${order.order_number}`,
+        "",
+        ...cartProducts.map(
+          (product, index) =>
+            `${index + 1}. ${product.name} x ${product.quantity} = ${formatPrice(
+              product.price * product.quantity
+            )} (${product.stock ? "In Nigeria" : "China Preorder"})`
+        ),
+        "",
+        `Total product amount: ${formatPrice(cartTotal)}`,
+        "",
+        "Please confirm availability and send me the payment details.",
+      ];
+
+      const whatsappMessage = encodeURIComponent(
+        messageLines.join("\n")
+      );
+
+      const whatsappUrl = `https://wa.me/${WHATSAPP_NUMBER}?text=${whatsappMessage}`;
+
+      // Clear cart only after order and items have been saved
+      setCart([]);
+      localStorage.removeItem("oraia_cart");
+
+      window.location.href = whatsappUrl;
+    } catch (err) {
+      setCheckoutError(
+        err instanceof Error
+          ? err.message
+          : "Unable to submit your order. Please try again."
+      );
+    } finally {
+      setCheckingOut(false);
+    }
+  }
+
   const newArrivals = products
     .filter((product) => product.isNew)
     .slice(0, 4);
@@ -244,13 +503,16 @@ export default function Home() {
     return matchesSearch && matchesCategory;
   });
 
-  function addToBag() {
-    if (!user) {
-      router.push("/login");
-      return;
-    }
-
-    setCart((previous) => previous + 1);
+  function renderProductCard(product: Product) {
+    return (
+      <ProductCard
+        key={product.id}
+        product={product}
+        onAdd={() => addToBag(product)}
+        isWishlisted={wishlist.includes(product.id)}
+        onToggleWishlist={() => toggleWishlist(product.id)}
+      />
+    );
   }
 
   return (
@@ -280,7 +542,29 @@ export default function Home() {
             <a href="#shipping">Shipping</a>
           </nav>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setShowCart(true);
+                setShowWishlist(false);
+              }}
+              className="rounded-full bg-[#40253f] px-4 py-3 text-xs font-medium text-white hover:bg-[#70466b]"
+            >
+              Bag ({cartCount})
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setShowWishlist(true);
+                setShowCart(false);
+              }}
+              className="rounded-full border border-pink-200 bg-[#f9eef3] px-4 py-3 text-xs font-medium text-[#40253f]"
+            >
+              ♥ Saved ({wishlist.length})
+            </button>
+
             {!authChecked ? (
               <span className="text-xs text-gray-400">Loading...</span>
             ) : !user ? (
@@ -300,70 +584,308 @@ export default function Home() {
                 </a>
               </>
             ) : (
-              <>
+              <div className="relative">
                 <button
-                  onClick={() => alert("Your shopping bag is coming soon.")}
-                  className="rounded-full bg-[#40253f] px-4 py-3 text-xs font-medium text-white hover:bg-[#70466b]"
+                  onClick={() =>
+                    setAccountDropdown((previous) => !previous)
+                  }
+                  className="flex items-center gap-2 rounded-full border border-[#40253f] bg-[#f9eef3] px-4 py-3 text-xs font-medium text-[#40253f]"
                 >
-                  Shopping Bag ({cart})
+                  My Account
+                  <span>{accountDropdown ? "▲" : "▼"}</span>
                 </button>
 
-                <div className="relative">
-                  <button
-                    onClick={() =>
-                      setAccountDropdown((previous) => !previous)
-                    }
-                    className="flex items-center gap-2 rounded-full border border-[#40253f] bg-[#f9eef3] px-4 py-3 text-xs font-medium text-[#40253f]"
-                  >
-                    My Account
-                    <span>{accountDropdown ? "▲" : "▼"}</span>
-                  </button>
+                {accountDropdown && (
+                  <div className="absolute right-0 top-full z-50 mt-2 w-56 overflow-hidden rounded-xl border border-pink-100 bg-white shadow-xl">
+                    <a
+                      href="/account"
+                      className="block px-5 py-4 text-sm text-[#40253f] hover:bg-[#fcf7fa]"
+                    >
+                      My Dashboard
+                    </a>
 
-                  {accountDropdown && (
-                    <div className="absolute right-0 top-full z-50 mt-2 w-56 overflow-hidden rounded-xl border border-pink-100 bg-white shadow-xl">
-                      <a
-                        href="/account"
-                        className="block px-5 py-4 text-sm text-[#40253f] hover:bg-[#fcf7fa]"
-                      >
-                        My Dashboard
-                      </a>
+                    <a
+                      href="/account#profile"
+                      className="block border-t border-pink-50 px-5 py-4 text-sm text-[#40253f] hover:bg-[#fcf7fa]"
+                    >
+                      My Profile
+                    </a>
 
-                      <a
-                        href="/account#profile"
-                        className="block border-t border-pink-50 px-5 py-4 text-sm text-[#40253f] hover:bg-[#fcf7fa]"
-                      >
-                        My Profile
-                      </a>
+                    <a
+                      href="/account#orders"
+                      className="block border-t border-pink-50 px-5 py-4 text-sm text-[#40253f] hover:bg-[#fcf7fa]"
+                    >
+                      My Orders
+                    </a>
 
-                      <a
-                        href="/account#orders"
-                        className="block border-t border-pink-50 px-5 py-4 text-sm text-[#40253f] hover:bg-[#fcf7fa]"
-                      >
-                        My Orders
-                      </a>
+                    <a
+                      href="/account#addresses"
+                      className="block border-t border-pink-50 px-5 py-4 text-sm text-[#40253f] hover:bg-[#fcf7fa]"
+                    >
+                      My Addresses
+                    </a>
 
-                      <a
-                        href="/account#addresses"
-                        className="block border-t border-pink-50 px-5 py-4 text-sm text-[#40253f] hover:bg-[#fcf7fa]"
-                      >
-                        My Addresses
-                      </a>
-
-                      <button
-                        onClick={handleLogout}
-                        disabled={loggingOut}
-                        className="block w-full border-t border-pink-100 px-5 py-4 text-left text-sm font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
-                      >
-                        {loggingOut ? "Logging Out..." : "Log Out"}
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </>
+                    <button
+                      onClick={handleLogout}
+                      disabled={loggingOut}
+                      className="block w-full border-t border-pink-100 px-5 py-4 text-left text-sm font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
+                    >
+                      {loggingOut ? "Logging Out..." : "Log Out"}
+                    </button>
+                  </div>
+                )}
+              </div>
             )}
           </div>
         </div>
       </header>
+
+      {/* CART PANEL */}
+      {showCart && (
+        <div className="fixed inset-0 z-[70] flex justify-end bg-black/40">
+          <div className="flex h-full w-full max-w-lg flex-col bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-pink-100 px-6 py-5">
+              <div>
+                <p className="text-xs uppercase tracking-widest text-[#b47c9c]">
+                  Your Selection
+                </p>
+                <h2 className="mt-1 text-xl font-semibold text-[#40253f]">
+                  Shopping Bag ({cartCount})
+                </h2>
+              </div>
+
+              <button
+                onClick={() => setShowCart(false)}
+                className="rounded-full bg-[#fcf7fa] px-4 py-2 text-sm text-[#40253f]"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6">
+              {cartProducts.length === 0 ? (
+                <div className="py-16 text-center">
+                  <p className="text-4xl text-[#b47c9c]">♡</p>
+                  <h3 className="mt-4 font-semibold text-[#40253f]">
+                    Your shopping bag is empty
+                  </h3>
+                  <p className="mt-2 text-sm text-gray-500">
+                    Add products you love and they will appear here.
+                  </p>
+                  <button
+                    onClick={() => setShowCart(false)}
+                    className="mt-6 rounded-full bg-[#40253f] px-6 py-3 text-sm text-white"
+                  >
+                    Continue Shopping
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-5">
+                  {cartProducts.map((product) => (
+                    <div
+                      key={product.id}
+                      className="flex gap-4 border-b border-pink-100 pb-5"
+                    >
+                      {product.image ? (
+                        <img
+                          src={product.image}
+                          alt={product.name}
+                          className="h-24 w-24 rounded-xl object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-24 w-24 items-center justify-center rounded-xl bg-[#fcf7fa] text-xs text-gray-400">
+                          No image
+                        </div>
+                      )}
+
+                      <div className="min-w-0 flex-1">
+                        <h3 className="font-semibold text-[#40253f]">
+                          {product.name}
+                        </h3>
+                        <p className="mt-1 text-sm text-gray-500">
+                          {formatPrice(product.price)}
+                        </p>
+                        <p className="mt-1 text-xs text-[#b47c9c]">
+                          {product.stock ? "In Nigeria" : "China Preorder"}
+                        </p>
+
+                        <div className="mt-3 flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-3">
+                            <button
+                              onClick={() =>
+                                changeQuantity(product.id, -1)
+                              }
+                              className="flex h-8 w-8 items-center justify-center rounded-full border border-pink-200"
+                            >
+                              −
+                            </button>
+
+                            <span className="text-sm font-medium">
+                              {product.quantity}
+                            </span>
+
+                            <button
+                              onClick={() =>
+                                changeQuantity(product.id, 1)
+                              }
+                              className="flex h-8 w-8 items-center justify-center rounded-full border border-pink-200"
+                            >
+                              +
+                            </button>
+                          </div>
+
+                          <button
+                            onClick={() => removeFromCart(product.id)}
+                            className="text-xs text-red-500"
+                          >
+                            Remove
+                          </button>
+                        </div>
+
+                        <p className="mt-3 text-sm font-semibold text-[#40253f]">
+                          {formatPrice(product.price * product.quantity)}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {cartProducts.length > 0 && (
+              <div className="border-t border-pink-100 p-6">
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-500">Product total</span>
+                  <span className="font-semibold text-[#40253f]">
+                    {formatPrice(cartTotal)}
+                  </span>
+                </div>
+
+                <p className="mt-3 text-xs leading-5 text-gray-500">
+                  Shipping charges, where applicable, will be confirmed separately.
+                </p>
+
+                {checkoutError && (
+                  <p className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-600">
+                    {checkoutError}
+                  </p>
+                )}
+
+                <button
+                  onClick={handleCheckout}
+                  disabled={checkingOut}
+                  className="mt-5 w-full rounded-full bg-[#40253f] px-6 py-4 text-sm font-semibold text-white hover:bg-[#70466b] disabled:opacity-50"
+                >
+                  {checkingOut
+                    ? "Submitting Your Order..."
+                    : "Proceed to WhatsApp Checkout"}
+                </button>
+
+                <button
+                  onClick={() => setShowCart(false)}
+                  className="mt-3 w-full rounded-full border border-[#40253f] px-6 py-3 text-sm text-[#40253f]"
+                >
+                  Continue Shopping
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* WISHLIST PANEL */}
+      {showWishlist && (
+        <div className="fixed inset-0 z-[70] flex justify-end bg-black/40">
+          <div className="flex h-full w-full max-w-lg flex-col bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-pink-100 px-6 py-5">
+              <div>
+                <p className="text-xs uppercase tracking-widest text-[#b47c9c]">
+                  Your Favourites
+                </p>
+                <h2 className="mt-1 text-xl font-semibold text-[#40253f]">
+                  My Wishlist ({wishlist.length})
+                </h2>
+              </div>
+
+              <button
+                onClick={() => setShowWishlist(false)}
+                className="rounded-full bg-[#fcf7fa] px-4 py-2 text-sm text-[#40253f]"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6">
+              {wishlistProducts.length === 0 ? (
+                <div className="py-16 text-center">
+                  <p className="text-4xl text-pink-500">♡</p>
+                  <h3 className="mt-4 font-semibold text-[#40253f]">
+                    No saved favourites yet
+                  </h3>
+                  <p className="mt-2 text-sm text-gray-500">
+                    Tap the heart on any product to save it here.
+                  </p>
+                  <button
+                    onClick={() => setShowWishlist(false)}
+                    className="mt-6 rounded-full bg-[#40253f] px-6 py-3 text-sm text-white"
+                  >
+                    Explore Products
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-5">
+                  {wishlistProducts.map((product) => (
+                    <div
+                      key={product.id}
+                      className="flex gap-4 border-b border-pink-100 pb-5"
+                    >
+                      {product.image ? (
+                        <img
+                          src={product.image}
+                          alt={product.name}
+                          className="h-24 w-24 rounded-xl object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-24 w-24 items-center justify-center rounded-xl bg-[#fcf7fa] text-xs text-gray-400">
+                          No image
+                        </div>
+                      )}
+
+                      <div className="min-w-0 flex-1">
+                        <h3 className="font-semibold text-[#40253f]">
+                          {product.name}
+                        </h3>
+
+                        <p className="mt-2 text-sm font-semibold text-[#40253f]">
+                          {formatPrice(product.price)}
+                        </p>
+
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          <button
+                            onClick={() =>
+                              moveWishlistItemToCart(product.id)
+                            }
+                            className="rounded-full bg-[#40253f] px-4 py-2 text-xs text-white"
+                          >
+                            Move to Bag
+                          </button>
+
+                          <button
+                            onClick={() => toggleWishlist(product.id)}
+                            className="rounded-full border border-pink-200 px-4 py-2 text-xs text-red-500"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* HERO */}
       <section id="home" className="bg-[#f9eef3] px-5 py-16 md:py-24">
@@ -449,13 +971,7 @@ export default function Home() {
           </p>
         ) : newArrivals.length > 0 ? (
           <div className="grid grid-cols-2 gap-5 md:grid-cols-4">
-            {newArrivals.map((product) => (
-              <ProductCard
-                key={product.id}
-                product={product}
-                onAdd={addToBag}
-              />
-            ))}
+            {newArrivals.map(renderProductCard)}
           </div>
         ) : (
           <p className="py-8 text-center text-gray-500">
@@ -485,13 +1001,7 @@ export default function Home() {
             </p>
           ) : inStockProducts.length > 0 ? (
             <div className="grid grid-cols-2 gap-5 md:grid-cols-4">
-              {inStockProducts.map((product) => (
-                <ProductCard
-                  key={product.id}
-                  product={product}
-                  onAdd={addToBag}
-                />
-              ))}
+              {inStockProducts.map(renderProductCard)}
             </div>
           ) : (
             <p className="py-8 text-center text-gray-500">
@@ -511,9 +1021,9 @@ export default function Home() {
             China Preorder Collection
           </h2>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-gray-500">
-            Explore products sourced from China. Product payment is made at
-            checkout. International shipping is calculated and paid separately
-            after your goods arrive in Nigeria.
+            Explore products sourced from China. Product payment is made
+            through WhatsApp checkout. International shipping is calculated
+            and paid separately after your goods arrive in Nigeria.
           </p>
         </div>
 
@@ -523,13 +1033,7 @@ export default function Home() {
           </p>
         ) : preorderProducts.length > 0 ? (
           <div className="grid grid-cols-2 gap-5 md:grid-cols-4">
-            {preorderProducts.map((product) => (
-              <ProductCard
-                key={product.id}
-                product={product}
-                onAdd={addToBag}
-              />
-            ))}
+            {preorderProducts.map(renderProductCard)}
           </div>
         ) : (
           <p className="py-8 text-center text-gray-500">
@@ -614,13 +1118,7 @@ export default function Home() {
         ) : (
           <>
             <div className="grid grid-cols-2 gap-5 md:grid-cols-4">
-              {filteredProducts.map((product) => (
-                <ProductCard
-                  key={product.id}
-                  product={product}
-                  onAdd={addToBag}
-                />
-              ))}
+              {filteredProducts.map(renderProductCard)}
             </div>
 
             {filteredProducts.length === 0 && (
@@ -800,10 +1298,10 @@ export default function Home() {
             </p>
 
             <p className="mt-3 text-sm leading-7 text-gray-600">
-              You pay for your products in full at checkout. International
-              shipping is paid separately after your goods arrive in Nigeria
-              and the actual shipping charges are confirmed. A separate
-              shipping invoice will then be prepared for payment.
+              You pay for your products in full after confirming your order.
+              International shipping is paid separately after your goods
+              arrive in Nigeria and the actual shipping charges are confirmed.
+              A separate shipping invoice will then be prepared for payment.
             </p>
           </div>
         </div>
@@ -830,8 +1328,8 @@ export default function Home() {
               ],
               [
                 "02",
-                "Pay For Your Products",
-                "Complete your product payment in full.",
+                "Confirm Your Order",
+                "Send your order through WhatsApp and receive payment details.",
               ],
               [
                 "03",
