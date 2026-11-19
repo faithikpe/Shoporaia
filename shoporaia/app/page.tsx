@@ -12,6 +12,12 @@ const supabase = createClient(
 
 const WHATSAPP_NUMBER = "2349043423379";
 
+const announcements = [
+  "CHINA PREORDER IS OPEN. SHOP YOUR FAVOURITES.",
+  "NEED SOMETHING FROM CHINA? LET ORAIA SOURCE IT FOR YOU.",
+  "QUALITY FINDS. EASY ORDERING. DELIVERY ACROSS NIGERIA.",
+];
+
 type Product = {
   id: string;
   name: string;
@@ -149,6 +155,10 @@ export default function Home() {
   const [checkingOut, setCheckingOut] = useState(false);
   const [checkoutError, setCheckoutError] = useState("");
 
+  // New homepage navigation states
+  const [showMenu, setShowMenu] = useState(false);
+  const [announcementIndex, setAnnouncementIndex] = useState(0);
+
   // Order request form
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
@@ -160,6 +170,17 @@ export default function Home() {
   const [orderSubmitted, setOrderSubmitted] = useState(false);
   const [submittedOrderNumber, setSubmittedOrderNumber] = useState("");
   const [submittedWhatsAppUrl, setSubmittedWhatsAppUrl] = useState("");
+
+  // Rotate the announcement messages
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setAnnouncementIndex((previous) =>
+        (previous + 1) % announcements.length
+      );
+    }, 4000);
+
+    return () => clearInterval(interval);
+  }, []);
 
   // Lock the homepage whenever the cart or wishlist is open.
   // The open panel will still scroll independently.
@@ -593,88 +614,110 @@ export default function Home() {
     );
   }
 
+  function closeMenu() {
+    setShowMenu(false);
+  }
+
   return (
     <main className="min-h-screen bg-white text-[#302033]">
-      <div className="bg-[#40253f] px-4 py-3 text-center text-xs tracking-wider text-white">
-        CHINA PREORDER • PERSONAL SHOPPING • NATIONWIDE DELIVERY
+      {/* ROTATING ANNOUNCEMENT BAR */}
+      <div className="relative flex min-h-10 items-center justify-center overflow-hidden bg-[#40253f] px-10 py-3 text-center text-[10px] font-medium tracking-[0.16em] text-white sm:text-xs">
+        <span
+          key={announcementIndex}
+          className="animate-[fadeIn_0.6s_ease-in-out]"
+        >
+          {announcements[announcementIndex]}
+        </span>
+
+        <div className="absolute bottom-1 left-0 right-0 flex justify-center gap-1">
+          {announcements.map((_, index) => (
+            <span
+              key={index}
+              className={`h-1 rounded-full transition-all ${
+                announcementIndex === index
+                  ? "w-4 bg-white"
+                  : "w-1 bg-white/40"
+              }`}
+            />
+          ))}
+        </div>
       </div>
 
-      {/* HEADER */}
-      <header className="sticky top-0 z-40 border-b border-pink-100 bg-white">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-5 py-4">
-          <a href="#home" className="shrink-0">
-            <span className="block text-2xl font-bold tracking-widest text-[#40253f]">
-              ORAIA
+      {/* NEW HEADER */}
+      <header className="sticky top-0 z-40 border-b border-pink-100 bg-white/95 backdrop-blur-md">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6 sm:py-4">
+
+          {/* LOGO */}
+          <a
+            href="#home"
+            onClick={closeMenu}
+            className="flex shrink-0 items-center gap-2.5"
+          >
+            <span className="flex h-11 w-11 items-center justify-center rounded-full border border-[#b47c9c] bg-[#f9eef3] text-xl font-semibold text-[#40253f]">
+              O
             </span>
-            <span className="block text-center text-xs tracking-[0.35em] text-[#b47c9c]">
-              BY DARA
+
+            <span>
+              <span className="block text-lg font-bold leading-none tracking-[0.16em] text-[#40253f] sm:text-xl">
+                ORAIA
+              </span>
+              <span className="mt-1 block text-[9px] font-medium tracking-[0.38em] text-[#b47c9c]">
+                BY DARA
+              </span>
             </span>
           </a>
 
-          <nav className="flex flex-wrap items-center gap-4 text-xs text-[#40253f] sm:gap-6 sm:text-sm">
-            <a href="#home">Home</a>
-            <a href="#new-arrivals">New Arrivals</a>
-            <a href="#in-stock">In Stock</a>
-            <a href="#china-preorder">Preorder</a>
-            <a href="#services">Services</a>
-            <a href="#shipping">Shipping</a>
-          </nav>
+          {/* HEADER ACTIONS */}
+          <div className="flex items-center gap-2 sm:gap-3">
 
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                setShowWishlist(false);
-                setShowCart(true);
-              }}
-              className="rounded-full bg-[#40253f] px-4 py-3 text-xs font-medium text-white hover:bg-[#70466b]"
-            >
-              Bag ({cartCount})
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setShowCart(false);
-                setShowWishlist(true);
-              }}
-              className="rounded-full border border-pink-200 bg-[#f9eef3] px-4 py-3 text-xs font-medium text-[#40253f]"
-            >
-              ♥ Saved ({wishlist.length})
-            </button>
-
+            {/* ACCOUNT */}
             {!authChecked ? (
-              <span className="text-xs text-gray-400">Loading...</span>
+              <span className="hidden text-xs text-gray-400 sm:block">
+                Loading...
+              </span>
             ) : !user ? (
-              <>
-                <a
-                  href="/login"
-                  className="rounded-full border border-[#40253f] px-4 py-3 text-xs font-medium text-[#40253f] hover:bg-[#f9eef3]"
+              <a
+                href="/login"
+                aria-label="Log in"
+                title="Log in"
+                className="flex h-10 w-10 items-center justify-center rounded-full border border-pink-100 text-lg text-[#40253f] transition hover:bg-[#f9eef3]"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  className="h-5 w-5"
                 >
-                  Log In
-                </a>
-
-                <a
-                  href="/signup"
-                  className="rounded-full bg-[#40253f] px-4 py-3 text-xs font-medium text-white hover:bg-[#70466b]"
-                >
-                  Sign Up
-                </a>
-              </>
+                  <circle cx="12" cy="8" r="3.5" />
+                  <path d="M5 20c.7-3.5 3.2-5.5 7-5.5s6.3 2 7 5.5" />
+                </svg>
+              </a>
             ) : (
               <div className="relative">
                 <button
+                  type="button"
                   onClick={() =>
                     setAccountDropdown((previous) => !previous)
                   }
-                  className="flex items-center gap-2 rounded-full border border-[#40253f] bg-[#f9eef3] px-4 py-3 text-xs font-medium text-[#40253f]"
+                  aria-label="My account"
+                  title="My account"
+                  className="flex h-10 w-10 items-center justify-center rounded-full border border-pink-100 text-[#40253f] transition hover:bg-[#f9eef3]"
                 >
-                  My Account
-                  <span>{accountDropdown ? "▲" : "▼"}</span>
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    className="h-5 w-5"
+                  >
+                    <circle cx="12" cy="8" r="3.5" />
+                    <path d="M5 20c.7-3.5 3.2-5.5 7-5.5s6.3 2 7 5.5" />
+                  </svg>
                 </button>
 
                 {accountDropdown && (
-                  <div className="absolute right-0 top-full z-50 mt-2 w-56 overflow-hidden rounded-xl border border-pink-100 bg-white shadow-xl">
+                  <div className="absolute right-0 top-full z-50 mt-3 w-56 overflow-hidden rounded-xl border border-pink-100 bg-white shadow-xl">
                     <a
                       href="/account"
                       className="block px-5 py-4 text-sm text-[#40253f] hover:bg-[#fcf7fa]"
@@ -714,8 +757,192 @@ export default function Home() {
                 )}
               </div>
             )}
+
+            {/* WISHLIST */}
+            <button
+              type="button"
+              onClick={() => {
+                setShowCart(false);
+                setShowWishlist(true);
+                closeMenu();
+              }}
+              aria-label="Open wishlist"
+              title="Wishlist"
+              className="relative flex h-10 w-10 items-center justify-center rounded-full border border-pink-100 text-xl text-[#40253f] transition hover:bg-[#f9eef3]"
+            >
+              ♡
+              {wishlist.length > 0 && (
+                <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#b47c9c] px-1 text-[9px] font-semibold text-white">
+                  {wishlist.length}
+                </span>
+              )}
+            </button>
+
+            {/* SHOPPING BAG */}
+            <button
+              type="button"
+              onClick={() => {
+                setShowWishlist(false);
+                setShowCart(true);
+                closeMenu();
+              }}
+              aria-label="Open shopping bag"
+              title="Shopping bag"
+              className="relative flex h-10 w-10 items-center justify-center rounded-full border border-pink-100 text-[#40253f] transition hover:bg-[#f9eef3]"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                className="h-5 w-5"
+              >
+                <path d="M5 8h14l1 12H4L5 8Z" />
+                <path d="M9 9V6a3 3 0 0 1 6 0v3" />
+              </svg>
+
+              {cartCount > 0 && (
+                <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#40253f] px-1 text-[9px] font-semibold text-white">
+                  {cartCount}
+                </span>
+              )}
+            </button>
+
+            {/* MENU BUTTON */}
+            <button
+              type="button"
+              onClick={() => {
+                setShowMenu((previous) => !previous);
+                setAccountDropdown(false);
+              }}
+              aria-label={showMenu ? "Close menu" : "Open menu"}
+              aria-expanded={showMenu}
+              className="flex h-10 items-center gap-2 rounded-full bg-[#40253f] px-4 text-xs font-medium text-white transition hover:bg-[#70466b]"
+            >
+              <span className="text-base leading-none">
+                {showMenu ? "×" : "☰"}
+              </span>
+              <span className="hidden sm:inline">
+                {showMenu ? "Close" : "Menu"}
+              </span>
+            </button>
           </div>
         </div>
+
+        {/* EXPANDABLE NAVIGATION MENU */}
+        {showMenu && (
+          <div className="absolute left-0 right-0 top-full z-50 border-t border-pink-100 bg-white shadow-xl">
+            <div className="mx-auto max-w-7xl px-5 py-6 sm:px-8">
+              <div className="grid gap-8 md:grid-cols-3">
+
+                <div>
+                  <p className="mb-4 text-[10px] font-semibold uppercase tracking-[0.2em] text-[#b47c9c]">
+                    Explore Oraia
+                  </p>
+
+                  <nav className="space-y-1">
+                    {[
+                      ["Home", "#home"],
+                      ["New Arrivals", "#new-arrivals"],
+                      ["In-Stock Collection", "#in-stock"],
+                      ["China Preorder", "#china-preorder"],
+                      ["Shop All Products", "#catalogue"],
+                    ].map(([label, link]) => (
+                      <a
+                        key={label}
+                        href={link}
+                        onClick={closeMenu}
+                        className="block rounded-lg px-3 py-3 text-sm text-[#40253f] transition hover:bg-[#fcf7fa]"
+                      >
+                        {label}
+                      </a>
+                    ))}
+                  </nav>
+                </div>
+
+                <div>
+                  <p className="mb-4 text-[10px] font-semibold uppercase tracking-[0.2em] text-[#b47c9c]">
+                    Our Services
+                  </p>
+
+                  <nav className="space-y-1">
+                    {[
+                      ["Personal Shopping", "#services"],
+                      ["Import & Procurement", "#services"],
+                      ["Shipping Information", "#shipping"],
+                      ["How It Works", "#how-it-works"],
+                    ].map(([label, link]) => (
+                      <a
+                        key={label}
+                        href={link}
+                        onClick={closeMenu}
+                        className="block rounded-lg px-3 py-3 text-sm text-[#40253f] transition hover:bg-[#fcf7fa]"
+                      >
+                        {label}
+                      </a>
+                    ))}
+                  </nav>
+                </div>
+
+                <div className="rounded-2xl bg-[#f9eef3] p-5">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#b47c9c]">
+                    Your Oraia Account
+                  </p>
+
+                  <h3 className="mt-3 text-lg font-semibold text-[#40253f]">
+                    {user ? "Welcome Back" : "Make Shopping Easier"}
+                  </h3>
+
+                  <p className="mt-2 text-sm leading-6 text-gray-600">
+                    {user
+                      ? "Manage your profile, saved addresses and orders."
+                      : "Create an account to manage your orders and shopping details."}
+                  </p>
+
+                  {user ? (
+                    <a
+                      href="/account"
+                      onClick={closeMenu}
+                      className="mt-5 inline-block rounded-full bg-[#40253f] px-5 py-3 text-xs font-medium text-white"
+                    >
+                      My Dashboard
+                    </a>
+                  ) : (
+                    <div className="mt-5 flex flex-wrap gap-2">
+                      <a
+                        href="/login"
+                        onClick={closeMenu}
+                        className="rounded-full border border-[#40253f] px-5 py-3 text-xs font-medium text-[#40253f]"
+                      >
+                        Log In
+                      </a>
+
+                      <a
+                        href="/signup"
+                        onClick={closeMenu}
+                        className="rounded-full bg-[#40253f] px-5 py-3 text-xs font-medium text-white"
+                      >
+                        Create Account
+                      </a>
+                    </div>
+                  )}
+
+                  <div className="mt-5 border-t border-pink-200 pt-4">
+                    <a
+                      href="https://wa.me/2349043423379"
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={closeMenu}
+                      className="text-xs font-medium text-[#40253f] underline underline-offset-4"
+                    >
+                      Need help? Contact us on WhatsApp
+                    </a>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </header>
 
       {/* CART PANEL */}
@@ -1118,50 +1345,83 @@ export default function Home() {
         </div>
       )}
 
-      {/* HERO */}
-      <section id="home" className="bg-[#f9eef3] px-5 py-16 md:py-24">
-        <div className="mx-auto grid max-w-7xl items-center gap-10 md:grid-cols-2">
-          <div>
-            <p className="mb-4 text-xs font-semibold uppercase tracking-[0.25em] text-[#ad7191]">
-              Welcome to Oraia by Dara
+      {/* REDESIGNED HERO */}
+      <section
+        id="home"
+        className="overflow-hidden bg-[#f9eef3] px-5 py-14 md:py-24"
+      >
+        <div className="mx-auto grid max-w-7xl items-center gap-10 md:grid-cols-2 md:gap-14">
+          <div className="max-w-xl">
+            <p className="mb-5 text-[10px] font-semibold uppercase tracking-[0.3em] text-[#ad7191] sm:text-xs">
+              A World of Beautiful Finds
             </p>
 
-            <h1 className="text-4xl font-semibold leading-tight text-[#40253f] md:text-6xl">
-              Shop China.
+            <h1 className="text-4xl font-semibold leading-[1.15] tracking-tight text-[#40253f] sm:text-5xl md:text-6xl">
+              Your next
               <br />
-              Shop smarter.
+              favourite find
               <br />
-              Shop with Oraia.
+              <span className="font-normal italic text-[#b47c9c]">
+                starts here.
+              </span>
             </h1>
 
-            <p className="mt-6 max-w-md leading-7 text-gray-600">
+            <p className="mt-6 max-w-md text-sm leading-7 text-gray-600 sm:text-base">
               Discover beautiful finds, everyday essentials and exciting
-              products sourced from China and Nigeria. Let us make shopping
-              and importing easier for you.
+              products sourced from China and Nigeria. Shop with ease or let
+              Oraia find exactly what you need.
             </p>
 
             <div className="mt-8 flex flex-wrap gap-3">
               <a
                 href="#catalogue"
-                className="rounded-full bg-[#40253f] px-7 py-3 text-sm text-white"
+                className="rounded-full bg-[#40253f] px-7 py-4 text-sm font-medium text-white transition hover:bg-[#70466b]"
               >
-                Explore Products
+                Discover the Collection
               </a>
 
               <a
                 href="#services"
-                className="rounded-full border border-[#40253f] px-7 py-3 text-sm text-[#40253f]"
+                className="rounded-full border border-[#40253f] px-7 py-4 text-sm font-medium text-[#40253f] transition hover:bg-white"
               >
                 Shop For Me
               </a>
             </div>
+
+            <div className="mt-9 flex flex-wrap items-center gap-x-6 gap-y-3 text-xs text-[#70566e]">
+              <span className="flex items-center gap-2">
+                <span className="text-[#b47c9c]">✦</span>
+                Quality Finds
+              </span>
+              <span className="flex items-center gap-2">
+                <span className="text-[#b47c9c]">✦</span>
+                Easy Ordering
+              </span>
+              <span className="flex items-center gap-2">
+                <span className="text-[#b47c9c]">✦</span>
+                China Sourcing
+              </span>
+            </div>
           </div>
 
-          <img
-            src="https://images.unsplash.com/photo-1483985988355-763728e1935b?w=1200"
-            alt="Fashion shopping collection"
-            className="h-80 w-full rounded-2xl object-cover md:h-[430px]"
-          />
+          <div className="relative">
+            <div className="absolute -right-5 -top-5 h-32 w-32 rounded-full bg-[#eddae5] blur-2xl" />
+
+            <img
+              src="https://images.unsplash.com/photo-1483985988355-763728e1935b?w=1200"
+              alt="Fashion shopping collection"
+              className="relative h-80 w-full rounded-[2rem] object-cover shadow-lg md:h-[480px]"
+            />
+
+            <div className="absolute -bottom-5 left-4 rounded-2xl bg-white px-5 py-4 shadow-lg sm:left-8">
+              <p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-[#b47c9c]">
+                Shop with Oraia
+              </p>
+              <p className="mt-1 text-sm font-semibold text-[#40253f]">
+                Find what you love.
+              </p>
+            </div>
+          </div>
         </div>
       </section>
 
