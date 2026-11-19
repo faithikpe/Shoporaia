@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
@@ -146,8 +145,12 @@ function formatDate(date: string | null | undefined) {
 function statusStyle(status: string | null | undefined) {
   const value = (status || "").toLowerCase();
 
+  if (value.includes("partially paid")) {
+    return "bg-amber-100 text-amber-800";
+  }
+
   if (
-    value.includes("paid") ||
+    value === "paid" ||
     value.includes("delivered") ||
     value.includes("completed") ||
     value.includes("confirmed")
@@ -158,7 +161,8 @@ function statusStyle(status: string | null | undefined) {
   if (
     value.includes("pending") ||
     value.includes("processing") ||
-    value.includes("transit")
+    value.includes("transit") ||
+    value.includes("unpaid")
   ) {
     return "bg-amber-100 text-amber-800";
   }
@@ -179,6 +183,7 @@ export default function AccountPage() {
 
   const [userId, setUserId] = useState("");
   const [view, setView] = useState<AccountView>("dashboard");
+
   const [profile, setProfile] = useState<CustomerProfile>({
     full_name: "",
     username: "",
@@ -288,7 +293,26 @@ export default function AccountPage() {
         .select("*")
         .in("order_id", orderIds);
 
-      setOrderItems((itemData || []) as OrderItem[]);
+      const itemsWithImages = await Promise.all(
+        (itemData || []).map(async (item) => {
+          let imageUrl = item.product_image || "";
+
+          if (imageUrl && !imageUrl.startsWith("http")) {
+            const { data: signedImage } = await supabase.storage
+              .from("product-images")
+              .createSignedUrl(imageUrl, 3600);
+
+            imageUrl = signedImage?.signedUrl || "";
+          }
+
+          return {
+            ...item,
+            product_image: imageUrl || null,
+          };
+        })
+      );
+
+      setOrderItems(itemsWithImages as OrderItem[]);
     } else {
       setOrderItems([]);
     }
@@ -349,7 +373,13 @@ export default function AccountPage() {
 
   function navigate(nextView: AccountView) {
     setView(nextView);
-    window.history.replaceState(null, "", `/account${nextView === "dashboard" ? "" : `#${nextView}`}`);
+
+    window.history.replaceState(
+      null,
+      "",
+      `/account${nextView === "dashboard" ? "" : `#${nextView}`}`
+    );
+
     setMessage("");
     setError("");
   }
@@ -489,7 +519,10 @@ export default function AccountPage() {
   }
 
   async function deleteAddress(addressId: string) {
-    if (!userId || !window.confirm("Are you sure you want to delete this address?")) {
+    if (
+      !userId ||
+      !window.confirm("Are you sure you want to delete this address?")
+    ) {
       return;
     }
 
@@ -554,17 +587,29 @@ export default function AccountPage() {
     if (!orderId) return "Not linked to an order";
 
     return (
-      orders.find((order) => order.id === orderId)?.order_number ||
-      "Order"
+      orders.find((order) => order.id === orderId)?.order_number || "Order"
     );
   }
 
-  const outstandingBalance = invoices
-    .filter((invoice) => {
-      const status = (invoice.payment_status || "").toLowerCase();
-      return status !== "paid" && status !== "completed";
-    })
-    .reduce((total, invoice) => total + Number(invoice.amount || 0), 0);
+  const outstandingBalance = invoices.reduce((total, invoice) => {
+    const status = (invoice.payment_status || "").toLowerCase();
+
+    if (status === "paid" || status === "completed") {
+      return total;
+    }
+
+    const paymentsForInvoice = receipts
+      .filter((receipt) => receipt.order_id === invoice.order_id)
+      .reduce(
+        (sum, receipt) => sum + Number(receipt.amount || 0),
+        0
+      );
+
+    return total + Math.max(
+      0,
+      Number(invoice.amount || 0) - paymentsForInvoice
+    );
+  }, 0);
 
   const paidTotal = receipts.reduce(
     (total, receipt) => total + Number(receipt.amount || 0),
@@ -585,7 +630,9 @@ export default function AccountPage() {
       <main className="flex min-h-screen items-center justify-center bg-[#fff8fc] px-5">
         <div className="text-center">
           <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-4 border-[#eadce6] border-t-[#75436d]" />
-          <p className="text-sm text-[#43243b]">Loading your account...</p>
+          <p className="text-sm text-[#43243b]">
+            Loading your account...
+          </p>
         </div>
       </main>
     );
@@ -608,7 +655,8 @@ export default function AccountPage() {
             </h1>
 
             <p className="mt-2 text-sm text-[#756574]">
-              Welcome back, {profile.full_name || profile.username || "Customer"}.
+              Welcome back,{" "}
+              {profile.full_name || profile.username || "Customer"}.
             </p>
           </div>
 
@@ -700,7 +748,9 @@ export default function AccountPage() {
                       onClick={() => navigate(item.action)}
                       className="rounded-2xl border border-[#f0e2ec] bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
                     >
-                      <p className="text-sm text-[#756574]">{item.label}</p>
+                      <p className="text-sm text-[#756574]">
+                        {item.label}
+                      </p>
                       <p className="mt-3 text-3xl font-bold text-[#43243b]">
                         {item.value}
                       </p>
@@ -777,7 +827,10 @@ export default function AccountPage() {
                           </div>
                           <div className="text-right">
                             <p className="font-semibold text-[#43243b]">
-                              {formatMoney(order.total_amount, order.currency || "NGN")}
+                              {formatMoney(
+                                order.total_amount,
+                                order.currency || "NGN"
+                              )}
                             </p>
                             <span
                               className={`mt-2 inline-block rounded-full px-3 py-1 text-xs font-medium ${statusStyle(
@@ -976,7 +1029,9 @@ export default function AccountPage() {
                       ))}
 
                       <div className="sm:col-span-2">
-                        <label className={labelStyle}>Full Delivery Address</label>
+                        <label className={labelStyle}>
+                          Full Delivery Address
+                        </label>
                         <textarea
                           className={inputStyle}
                           rows={3}
@@ -1133,7 +1188,9 @@ export default function AccountPage() {
                     >
                       <div className="flex flex-wrap items-start justify-between gap-4 border-b border-[#f0e2ec] pb-4">
                         <div>
-                          <p className="text-xs text-[#756574]">Order Number</p>
+                          <p className="text-xs text-[#756574]">
+                            Order Number
+                          </p>
                           <h3 className="mt-1 font-bold text-[#43243b]">
                             {order.order_number}
                           </h3>
@@ -1205,7 +1262,9 @@ export default function AccountPage() {
 
                       <div className="grid gap-4 border-t border-[#f0e2ec] pt-4 sm:grid-cols-2">
                         <div>
-                          <p className="text-xs text-[#756574]">Order Total</p>
+                          <p className="text-xs text-[#756574]">
+                            Order Total
+                          </p>
                           <p className="mt-1 text-lg font-bold text-[#43243b]">
                             {formatMoney(
                               order.total_amount,
@@ -1215,21 +1274,27 @@ export default function AccountPage() {
                         </div>
 
                         <div>
-                          <p className="text-xs text-[#756574]">Shipping Status</p>
+                          <p className="text-xs text-[#756574]">
+                            Shipping Status
+                          </p>
                           <p className="mt-1 font-semibold text-[#43243b]">
                             {order.shipping_status || "Not shipped"}
                           </p>
                         </div>
 
                         <div>
-                          <p className="text-xs text-[#756574]">Shipping Carrier</p>
+                          <p className="text-xs text-[#756574]">
+                            Shipping Carrier
+                          </p>
                           <p className="mt-1 text-sm font-medium text-[#43243b]">
                             {order.shipping_carrier || "Not yet assigned"}
                           </p>
                         </div>
 
                         <div>
-                          <p className="text-xs text-[#756574]">Tracking Number</p>
+                          <p className="text-xs text-[#756574]">
+                            Tracking Number
+                          </p>
                           <p className="mt-1 break-all text-sm font-medium text-[#43243b]">
                             {order.tracking_number || "Not yet available"}
                           </p>
@@ -1280,7 +1345,9 @@ export default function AccountPage() {
                     >
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div>
-                          <p className="text-xs text-[#756574]">Invoice Number</p>
+                          <p className="text-xs text-[#756574]">
+                            Invoice Number
+                          </p>
                           <h3 className="mt-1 font-bold text-[#43243b]">
                             {invoice.invoice_number}
                           </h3>
@@ -1300,28 +1367,36 @@ export default function AccountPage() {
 
                       <div className="mt-5 grid gap-4 border-t border-[#f0e2ec] pt-4 sm:grid-cols-2">
                         <div>
-                          <p className="text-xs text-[#756574]">Invoice Type</p>
+                          <p className="text-xs text-[#756574]">
+                            Invoice Type
+                          </p>
                           <p className="mt-1 text-sm font-semibold text-[#43243b]">
                             {invoice.invoice_type || "Order Invoice"}
                           </p>
                         </div>
 
                         <div>
-                          <p className="text-xs text-[#756574]">Related Order</p>
+                          <p className="text-xs text-[#756574]">
+                            Related Order
+                          </p>
                           <p className="mt-1 text-sm font-semibold text-[#43243b]">
                             {orderNumberFor(invoice.order_id)}
                           </p>
                         </div>
 
                         <div>
-                          <p className="text-xs text-[#756574]">Due Date</p>
+                          <p className="text-xs text-[#756574]">
+                            Due Date
+                          </p>
                           <p className="mt-1 text-sm font-semibold text-[#43243b]">
                             {formatDate(invoice.due_date)}
                           </p>
                         </div>
 
                         <div>
-                          <p className="text-xs text-[#756574]">Invoice Amount</p>
+                          <p className="text-xs text-[#756574]">
+                            Invoice Amount
+                          </p>
                           <p className="mt-1 text-lg font-bold text-[#43243b]">
                             {formatMoney(invoice.amount)}
                           </p>
@@ -1369,7 +1444,9 @@ export default function AccountPage() {
                     >
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div>
-                          <p className="text-xs text-[#756574]">Receipt Number</p>
+                          <p className="text-xs text-[#756574]">
+                            Receipt Number
+                          </p>
                           <h3 className="mt-1 font-bold text-[#43243b]">
                             {receipt.receipt_number}
                           </h3>
@@ -1385,28 +1462,36 @@ export default function AccountPage() {
 
                       <div className="mt-5 grid gap-4 border-t border-[#f0e2ec] pt-4 sm:grid-cols-2">
                         <div>
-                          <p className="text-xs text-[#756574]">Related Order</p>
+                          <p className="text-xs text-[#756574]">
+                            Related Order
+                          </p>
                           <p className="mt-1 text-sm font-semibold text-[#43243b]">
                             {orderNumberFor(receipt.order_id)}
                           </p>
                         </div>
 
                         <div>
-                          <p className="text-xs text-[#756574]">Payment Method</p>
+                          <p className="text-xs text-[#756574]">
+                            Payment Method
+                          </p>
                           <p className="mt-1 text-sm font-semibold text-[#43243b]">
                             {receipt.payment_method || "Not specified"}
                           </p>
                         </div>
 
                         <div>
-                          <p className="text-xs text-[#756574]">Payment Reference</p>
+                          <p className="text-xs text-[#756574]">
+                            Payment Reference
+                          </p>
                           <p className="mt-1 break-all text-sm font-semibold text-[#43243b]">
                             {receipt.payment_reference || "Not provided"}
                           </p>
                         </div>
 
                         <div>
-                          <p className="text-xs text-[#756574]">Amount Paid</p>
+                          <p className="text-xs text-[#756574]">
+                            Amount Paid
+                          </p>
                           <p className="mt-1 text-lg font-bold text-[#43243b]">
                             {formatMoney(receipt.amount)}
                           </p>
