@@ -14,12 +14,27 @@ type Product = {
   name: string;
   description: string | null;
   price: number;
+  discount_percent: number;
   category: string;
   origin: string;
   quantity: number;
   image_path: string | null;
   is_active: boolean;
   imageUrl?: string;
+};
+
+type PromoCode = {
+  id: string;
+  code: string;
+  discount_type: "percentage" | "fixed";
+  discount_value: number;
+  minimum_order_amount: number;
+  starts_at: string | null;
+  expires_at: string | null;
+  usage_limit: number | null;
+  usage_count: number;
+  is_active: boolean;
+  created_at: string;
 };
 
 type Customer = {
@@ -84,15 +99,31 @@ type OrderLine = {
   quantity: string;
 };
 
-type Tab = "products" | "orders" | "invoices" | "receipts";
+type Tab =
+  | "products"
+  | "discounts"
+  | "orders"
+  | "invoices"
+  | "receipts";
 
 const emptyForm = {
   name: "",
   description: "",
   price: "",
+  discount_percent: "0",
   category: "",
   origin: "In stock in Nigeria",
   quantity: "0",
+};
+
+const emptyPromoForm = {
+  code: "",
+  discount_type: "percentage" as "percentage" | "fixed",
+  discount_value: "",
+  minimum_order_amount: "0",
+  starts_at: "",
+  expires_at: "",
+  usage_limit: "",
 };
 
 const categories = [
@@ -127,6 +158,15 @@ function money(amount: number, currency = "NGN") {
   return `${currency} ${value.toLocaleString()}`;
 }
 
+function discountedPrice(product: Product) {
+  const discount = Math.min(
+    100,
+    Math.max(0, Number(product.discount_percent || 0))
+  );
+
+  return Number(product.price) * (1 - discount / 100);
+}
+
 function dateText(date: string | null | undefined) {
   if (!date) return "Not set";
 
@@ -135,6 +175,27 @@ function dateText(date: string | null | undefined) {
     month: "short",
     year: "numeric",
   });
+}
+
+function dateTimeText(date: string | null | undefined) {
+  if (!date) return "Not set";
+
+  return new Date(date).toLocaleString("en-NG", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function toLocalDateTime(value: string | null) {
+  if (!value) return "";
+
+  const date = new Date(value);
+  const offset = date.getTimezoneOffset() * 60000;
+
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
 }
 
 function makeReference(prefix: string) {
@@ -180,11 +241,15 @@ export default function AdminPage() {
   const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [receipts, setReceipts] = useState<Receipt[]>([]);
+  const [promoCodes, setPromoCodes] = useState<PromoCode[]>([]);
 
   const [tab, setTab] = useState<Tab>("products");
   const [form, setForm] = useState(emptyForm);
   const [image, setImage] = useState<File | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+
+  const [promoForm, setPromoForm] = useState(emptyPromoForm);
+  const [editingPromoId, setEditingPromoId] = useState<string | null>(null);
 
   const [selectedCustomer, setSelectedCustomer] = useState("");
   const [orderLines, setOrderLines] = useState<OrderLine[]>([
@@ -237,7 +302,9 @@ export default function AdminPage() {
     if (error || !data) {
       await supabase.auth.signOut();
       setLoggedIn(false);
-      setMessage("This account is not authorized to access the admin dashboard.");
+      setMessage(
+        "This account is not authorized to access the admin dashboard."
+      );
       setChecking(false);
       return;
     }
@@ -276,6 +343,7 @@ export default function AdminPage() {
     setOrderItems([]);
     setInvoices([]);
     setReceipts([]);
+    setPromoCodes([]);
     setMessage("You have logged out.");
   }
 
@@ -286,6 +354,7 @@ export default function AdminPage() {
       loadOrders(),
       loadInvoices(),
       loadReceipts(),
+      loadPromoCodes(),
     ]);
   }
 
@@ -312,11 +381,29 @@ export default function AdminPage() {
           imageUrl = signedImage?.signedUrl || "";
         }
 
-        return { ...product, imageUrl };
+        return {
+          ...product,
+          discount_percent: Number(product.discount_percent || 0),
+          imageUrl,
+        };
       })
     );
 
     setProducts(items as Product[]);
+  }
+
+  async function loadPromoCodes() {
+    const { data, error } = await supabase
+      .from("promo_codes")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      setMessage("Could not load promo codes: " + error.message);
+      return;
+    }
+
+    setPromoCodes((data || []) as PromoCode[]);
   }
 
   async function loadCustomers() {
@@ -412,6 +499,7 @@ export default function AdminPage() {
       name: product.name,
       description: product.description || "",
       price: String(product.price),
+      discount_percent: String(product.discount_percent || 0),
       category: product.category,
       origin: product.origin,
       quantity: String(product.quantity),
@@ -424,6 +512,19 @@ export default function AdminPage() {
 
   async function saveProduct(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+
+    const discount = Number(form.discount_percent || 0);
+
+    if (!Number.isFinite(discount) || discount < 0 || discount > 100) {
+      setMessage("Product discount must be between 0 and 100 percent.");
+      return;
+    }
+
+    if (Number(form.price) <= 0) {
+      setMessage("Enter a valid product price.");
+      return;
+    }
+
     setLoading(true);
     setMessage("");
 
@@ -452,6 +553,7 @@ export default function AdminPage() {
           name: form.name,
           description: form.description,
           price: Number(form.price),
+          discount_percent: discount,
           category: form.category,
           origin: form.origin,
           quantity: Number(form.quantity),
@@ -479,6 +581,7 @@ export default function AdminPage() {
           name: form.name,
           description: form.description,
           price: Number(form.price),
+          discount_percent: discount,
           category: form.category,
           origin: form.origin,
           quantity: Number(form.quantity),
@@ -557,6 +660,184 @@ export default function AdminPage() {
     await loadProducts();
   }
 
+  function resetPromoForm() {
+    setPromoForm(emptyPromoForm);
+    setEditingPromoId(null);
+  }
+
+  function editPromo(promo: PromoCode) {
+    setEditingPromoId(promo.id);
+    setPromoForm({
+      code: promo.code,
+      discount_type: promo.discount_type,
+      discount_value: String(promo.discount_value),
+      minimum_order_amount: String(promo.minimum_order_amount || 0),
+      starts_at: toLocalDateTime(promo.starts_at),
+      expires_at: toLocalDateTime(promo.expires_at),
+      usage_limit:
+        promo.usage_limit === null ? "" : String(promo.usage_limit),
+    });
+
+    setMessage("");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  async function savePromoCode(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+
+    const code = promoForm.code.trim().toUpperCase();
+    const value = Number(promoForm.discount_value);
+    const minimum = Number(promoForm.minimum_order_amount || 0);
+    const usageLimit =
+      promoForm.usage_limit.trim() === ""
+        ? null
+        : Number(promoForm.usage_limit);
+
+    if (!code) {
+      setMessage("Enter a promo code.");
+      return;
+    }
+
+    if (!Number.isFinite(value) || value <= 0) {
+      setMessage("Enter a valid discount value.");
+      return;
+    }
+
+    if (promoForm.discount_type === "percentage" && value > 100) {
+      setMessage("Percentage promo discounts cannot exceed 100%.");
+      return;
+    }
+
+    if (!Number.isFinite(minimum) || minimum < 0) {
+      setMessage("Enter a valid minimum order amount.");
+      return;
+    }
+
+    if (
+      usageLimit !== null &&
+      (!Number.isInteger(usageLimit) || usageLimit < 1)
+    ) {
+      setMessage("Usage limit must be a whole number greater than zero.");
+      return;
+    }
+
+    const startsAt = promoForm.starts_at
+      ? new Date(promoForm.starts_at).toISOString()
+      : new Date().toISOString();
+
+    const expiresAt = promoForm.expires_at
+      ? new Date(promoForm.expires_at).toISOString()
+      : null;
+
+    if (
+      expiresAt &&
+      new Date(expiresAt).getTime() <= new Date(startsAt).getTime()
+    ) {
+      setMessage("The expiry date must be after the start date.");
+      return;
+    }
+
+    setLoading(true);
+    setMessage("");
+
+    try {
+      const promoData = {
+        code,
+        discount_type: promoForm.discount_type,
+        discount_value: value,
+        minimum_order_amount: minimum,
+        starts_at: startsAt,
+        expires_at: expiresAt,
+        usage_limit: usageLimit,
+      };
+
+      if (editingPromoId) {
+        const { error } = await supabase
+          .from("promo_codes")
+          .update(promoData)
+          .eq("id", editingPromoId);
+
+        if (error) throw error;
+
+        setMessage("Promo code updated successfully.");
+      } else {
+        const { error } = await supabase.from("promo_codes").insert({
+          ...promoData,
+          usage_count: 0,
+          is_active: true,
+        });
+
+        if (error) {
+          if (error.code === "23505") {
+            throw new Error("This promo code already exists.");
+          }
+          throw error;
+        }
+
+        setMessage("Promo code created successfully.");
+      }
+
+      resetPromoForm();
+      await loadPromoCodes();
+    } catch (error) {
+      setMessage(
+        "Could not save promo code: " +
+          (error instanceof Error ? error.message : "Something went wrong.")
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function togglePromo(promo: PromoCode) {
+    setLoading(true);
+    setMessage("");
+
+    const { error } = await supabase
+      .from("promo_codes")
+      .update({ is_active: !promo.is_active })
+      .eq("id", promo.id);
+
+    if (error) {
+      setMessage("Could not update promo code: " + error.message);
+    } else {
+      setMessage(
+        promo.is_active
+          ? "Promo code deactivated."
+          : "Promo code activated."
+      );
+      await loadPromoCodes();
+    }
+
+    setLoading(false);
+  }
+
+  async function deletePromo(promo: PromoCode) {
+    const confirmed = window.confirm(
+      `Delete promo code "${promo.code}"? This cannot be undone.`
+    );
+
+    if (!confirmed) return;
+
+    setLoading(true);
+    setMessage("");
+
+    const { error } = await supabase
+      .from("promo_codes")
+      .delete()
+      .eq("id", promo.id);
+
+    if (error) {
+      setMessage("Could not delete promo code: " + error.message);
+    } else {
+      setMessage("Promo code deleted.");
+      if (editingPromoId === promo.id) resetPromoForm();
+      await loadPromoCodes();
+    }
+
+    setLoading(false);
+  }
+
   function updateOrderLine(
     index: number,
     field: keyof OrderLine,
@@ -586,7 +867,12 @@ export default function AdminPage() {
 
   const orderTotal = orderLines.reduce((total, line) => {
     const product = products.find((item) => item.id === line.product_id);
-    return total + Number(product?.price || 0) * Number(line.quantity || 0);
+
+    return (
+      total +
+      (product ? discountedPrice(product) : 0) *
+        Number(line.quantity || 0)
+    );
   }, 0);
 
   async function createOrder(e: FormEvent<HTMLFormElement>) {
@@ -624,13 +910,14 @@ export default function AdminPage() {
         if (!product) throw new Error("A selected product could not be found.");
 
         const quantity = Number(line.quantity);
+        const unitPrice = discountedPrice(product);
 
         return {
           product_name: product.name,
           product_image: product.imageUrl || null,
           quantity,
-          unit_price: Number(product.price),
-          total_price: Number(product.price) * quantity,
+          unit_price: unitPrice,
+          total_price: unitPrice * quantity,
         };
       });
 
@@ -675,7 +962,9 @@ export default function AdminPage() {
         throw itemsError;
       }
 
-      setMessage(`Order ${orderNumber} created for ${customer.full_name || customer.email}.`);
+      setMessage(
+        `Order ${orderNumber} created for ${customer.full_name || customer.email}.`
+      );
       setSelectedCustomer("");
       setOrderLines([{ product_id: "", quantity: "1" }]);
       await loadOrders();
@@ -930,12 +1219,13 @@ export default function AdminPage() {
           </div>
         )}
 
-        <div className="mb-7 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="mb-7 grid grid-cols-2 gap-3 sm:grid-cols-5">
           {[
             ["Products", products.length],
             ["Customers", customers.length],
             ["Orders", orders.length],
             ["Invoices", invoices.length],
+            ["Promo Codes", promoCodes.length],
           ].map(([label, value]) => (
             <div
               key={String(label)}
@@ -953,6 +1243,7 @@ export default function AdminPage() {
           {(
             [
               ["products", "Products"],
+              ["discounts", "Discounts & Promo Codes"],
               ["orders", "Orders"],
               ["invoices", "Invoices"],
               ["receipts", "Receipts"],
@@ -1000,7 +1291,7 @@ export default function AdminPage() {
                   <label className={labelStyle}>Price (₦)</label>
                   <input
                     type="number"
-                    min="0"
+                    min="0.01"
                     step="0.01"
                     value={form.price}
                     onChange={(e) =>
@@ -1010,6 +1301,39 @@ export default function AdminPage() {
                     className={inputStyle}
                     placeholder="Enter price"
                   />
+                </div>
+
+                <div>
+                  <label className={labelStyle}>Product Discount (%)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="0.01"
+                    value={form.discount_percent}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        discount_percent: e.target.value,
+                      })
+                    }
+                    className={inputStyle}
+                    placeholder="0"
+                  />
+                  <p className="mt-1 text-xs text-[#756574]">
+                    Enter 0 for no discount. Enter 20 for 20% off.
+                  </p>
+                  {Number(form.price) > 0 &&
+                    Number(form.discount_percent) > 0 &&
+                    Number(form.discount_percent) <= 100 && (
+                      <p className="mt-2 text-sm font-semibold text-green-700">
+                        Customer price:{" "}
+                        {money(
+                          Number(form.price) *
+                            (1 - Number(form.discount_percent) / 100)
+                        )}
+                      </p>
+                    )}
                 </div>
 
                 <div>
@@ -1156,9 +1480,25 @@ export default function AdminPage() {
                         <h3 className="font-bold text-[#43243b]">
                           {product.name}
                         </h3>
-                        <p className="mt-1 font-semibold text-[#302331]">
-                          {money(product.price)}
-                        </p>
+
+                        {product.discount_percent > 0 ? (
+                          <div className="mt-2">
+                            <p className="text-sm text-gray-500 line-through">
+                              {money(product.price)}
+                            </p>
+                            <p className="font-bold text-[#75436d]">
+                              {money(discountedPrice(product))}
+                            </p>
+                            <span className="mt-1 inline-block rounded-full bg-pink-100 px-3 py-1 text-xs font-semibold text-[#75436d]">
+                              {product.discount_percent}% OFF
+                            </span>
+                          </div>
+                        ) : (
+                          <p className="mt-2 font-semibold text-[#302331]">
+                            {money(product.price)}
+                          </p>
+                        )}
+
                         <p className="mt-2 text-sm text-[#756574]">
                           {product.category} · {product.origin}
                         </p>
@@ -1202,6 +1542,336 @@ export default function AdminPage() {
           </>
         )}
 
+        {tab === "discounts" && (
+          <div className="space-y-8">
+            <section className="rounded-2xl border border-[#f0e2ec] bg-white p-5 shadow-sm sm:p-7">
+              <h2 className="text-xl font-bold text-[#43243b]">
+                {editingPromoId ? "Edit Promo Code" : "Create Promo Code"}
+              </h2>
+              <p className="mb-6 mt-2 text-sm text-[#756574]">
+                Create promotional codes customers can enter when placing an
+                order. You can set the discount, minimum spend, dates and usage
+                limit.
+              </p>
+
+              <form onSubmit={savePromoCode} className="grid gap-5 sm:grid-cols-2">
+                <div>
+                  <label className={labelStyle}>Promo Code</label>
+                  <input
+                    value={promoForm.code}
+                    onChange={(e) =>
+                      setPromoForm({
+                        ...promoForm,
+                        code: e.target.value.toUpperCase().replace(/\s/g, ""),
+                      })
+                    }
+                    required
+                    className={inputStyle}
+                    placeholder="e.g. ORAIA20"
+                  />
+                  <p className="mt-1 text-xs text-[#756574]">
+                    Spaces are removed automatically.
+                  </p>
+                </div>
+
+                <div>
+                  <label className={labelStyle}>Discount Type</label>
+                  <select
+                    value={promoForm.discount_type}
+                    onChange={(e) =>
+                      setPromoForm({
+                        ...promoForm,
+                        discount_type: e.target.value as
+                          | "percentage"
+                          | "fixed",
+                      })
+                    }
+                    className={inputStyle}
+                  >
+                    <option value="percentage">Percentage discount (%)</option>
+                    <option value="fixed">Fixed amount (₦)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className={labelStyle}>
+                    {promoForm.discount_type === "percentage"
+                      ? "Discount Percentage"
+                      : "Discount Amount (₦)"}
+                  </label>
+                  <input
+                    type="number"
+                    min="0.01"
+                    max={
+                      promoForm.discount_type === "percentage"
+                        ? "100"
+                        : undefined
+                    }
+                    step="0.01"
+                    value={promoForm.discount_value}
+                    onChange={(e) =>
+                      setPromoForm({
+                        ...promoForm,
+                        discount_value: e.target.value,
+                      })
+                    }
+                    required
+                    className={inputStyle}
+                    placeholder={
+                      promoForm.discount_type === "percentage" ? "20" : "2000"
+                    }
+                  />
+                </div>
+
+                <div>
+                  <label className={labelStyle}>
+                    Minimum Order Amount (₦)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={promoForm.minimum_order_amount}
+                    onChange={(e) =>
+                      setPromoForm({
+                        ...promoForm,
+                        minimum_order_amount: e.target.value,
+                      })
+                    }
+                    className={inputStyle}
+                  />
+                </div>
+
+                <div>
+                  <label className={labelStyle}>Start Date & Time</label>
+                  <input
+                    type="datetime-local"
+                    value={promoForm.starts_at}
+                    onChange={(e) =>
+                      setPromoForm({
+                        ...promoForm,
+                        starts_at: e.target.value,
+                      })
+                    }
+                    className={inputStyle}
+                  />
+                  <p className="mt-1 text-xs text-[#756574]">
+                    Leave blank to start immediately.
+                  </p>
+                </div>
+
+                <div>
+                  <label className={labelStyle}>Expiry Date & Time</label>
+                  <input
+                    type="datetime-local"
+                    value={promoForm.expires_at}
+                    onChange={(e) =>
+                      setPromoForm({
+                        ...promoForm,
+                        expires_at: e.target.value,
+                      })
+                    }
+                    className={inputStyle}
+                  />
+                  <p className="mt-1 text-xs text-[#756574]">
+                    Leave blank if the code has no expiry date.
+                  </p>
+                </div>
+
+                <div>
+                  <label className={labelStyle}>Usage Limit</label>
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={promoForm.usage_limit}
+                    onChange={(e) =>
+                      setPromoForm({
+                        ...promoForm,
+                        usage_limit: e.target.value,
+                      })
+                    }
+                    className={inputStyle}
+                    placeholder="e.g. 50"
+                  />
+                  <p className="mt-1 text-xs text-[#756574]">
+                    Leave blank for unlimited uses.
+                  </p>
+                </div>
+
+                <div className="flex items-end gap-3">
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="rounded-xl bg-[#75436d] px-7 py-3 font-semibold text-white hover:bg-[#603657] disabled:opacity-50"
+                  >
+                    {loading
+                      ? "Saving..."
+                      : editingPromoId
+                        ? "Save Changes"
+                        : "Create Promo Code"}
+                  </button>
+
+                  {editingPromoId && (
+                    <button
+                      type="button"
+                      onClick={resetPromoForm}
+                      className="rounded-xl border border-[#eadce6] px-5 py-3 text-sm text-[#43243b]"
+                    >
+                      Cancel
+                    </button>
+                  )}
+                </div>
+              </form>
+            </section>
+
+            <section>
+              <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-xl font-bold text-[#43243b]">
+                    Your Promo Codes ({promoCodes.length})
+                  </h2>
+                  <p className="mt-1 text-sm text-[#756574]">
+                    Manage your active and inactive promotional codes.
+                  </p>
+                </div>
+
+                <button
+                  onClick={loadPromoCodes}
+                  className="rounded-xl border border-[#eadce6] bg-white px-4 py-2 text-sm text-[#43243b]"
+                >
+                  Refresh
+                </button>
+              </div>
+
+              {promoCodes.length === 0 ? (
+                <div className="rounded-2xl bg-white p-8 text-center text-sm text-[#756574]">
+                  You have not created any promo codes yet.
+                </div>
+              ) : (
+                <div className="grid gap-4 lg:grid-cols-2">
+                  {promoCodes.map((promo) => {
+                    const expired =
+                      promo.expires_at &&
+                      new Date(promo.expires_at).getTime() < Date.now();
+
+                    const notStarted =
+                      promo.starts_at &&
+                      new Date(promo.starts_at).getTime() > Date.now();
+
+                    const limitReached =
+                      promo.usage_limit !== null &&
+                      promo.usage_count >= promo.usage_limit;
+
+                    return (
+                      <article
+                        key={promo.id}
+                        className="rounded-2xl border border-[#f0e2ec] bg-white p-5 shadow-sm"
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <p className="text-xs uppercase tracking-wide text-[#756574]">
+                              Promo Code
+                            </p>
+                            <h3 className="mt-1 text-2xl font-bold tracking-wide text-[#43243b]">
+                              {promo.code}
+                            </h3>
+                          </div>
+
+                          <span
+                            className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                              !promo.is_active
+                                ? "bg-gray-100 text-gray-600"
+                                : expired || notStarted || limitReached
+                                  ? "bg-amber-100 text-amber-800"
+                                  : "bg-green-100 text-green-800"
+                            }`}
+                          >
+                            {!promo.is_active
+                              ? "Inactive"
+                              : expired
+                                ? "Expired"
+                                : notStarted
+                                  ? "Scheduled"
+                                  : limitReached
+                                    ? "Limit reached"
+                                    : "Active"}
+                          </span>
+                        </div>
+
+                        <div className="my-4 rounded-xl bg-[#f9edf5] p-4">
+                          <p className="text-sm text-[#756574]">Discount</p>
+                          <p className="mt-1 text-2xl font-bold text-[#75436d]">
+                            {promo.discount_type === "percentage"
+                              ? `${promo.discount_value}% OFF`
+                              : `${money(promo.discount_value)} OFF`}
+                          </p>
+                        </div>
+
+                        <div className="grid gap-3 text-sm sm:grid-cols-2">
+                          <p>
+                            <span className="text-[#756574]">Minimum spend:</span>
+                            <br />
+                            <strong>{money(promo.minimum_order_amount)}</strong>
+                          </p>
+                          <p>
+                            <span className="text-[#756574]">Usage:</span>
+                            <br />
+                            <strong>
+                              {promo.usage_count}
+                              {" / "}
+                              {promo.usage_limit ?? "Unlimited"}
+                            </strong>
+                          </p>
+                          <p>
+                            <span className="text-[#756574]">Starts:</span>
+                            <br />
+                            <strong>{dateTimeText(promo.starts_at)}</strong>
+                          </p>
+                          <p>
+                            <span className="text-[#756574]">Expires:</span>
+                            <br />
+                            <strong>{dateTimeText(promo.expires_at)}</strong>
+                          </p>
+                        </div>
+
+                        <div className="mt-5 flex flex-wrap gap-2 border-t border-[#f0e2ec] pt-4">
+                          <button
+                            onClick={() => editPromo(promo)}
+                            className="rounded-lg bg-[#75436d] px-4 py-2 text-sm font-semibold text-white"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => togglePromo(promo)}
+                            disabled={loading}
+                            className="rounded-lg border border-[#eadce6] px-4 py-2 text-sm text-[#43243b] disabled:opacity-50"
+                          >
+                            {promo.is_active ? "Deactivate" : "Activate"}
+                          </button>
+                          <button
+                            onClick={() => deletePromo(promo)}
+                            disabled={loading}
+                            className="rounded-lg border border-red-300 px-4 py-2 text-sm text-red-600 disabled:opacity-50"
+                          >
+                            Delete
+                          </button>
+                          <button
+                            onClick={() => GenUIcopyPromo(promo.code)}
+                            className="rounded-lg border border-[#eadce6] px-4 py-2 text-sm text-[#43243b]"
+                          >
+                            Copy Code
+                          </button>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          </div>
+        )}
+
         {tab === "orders" && (
           <div className="space-y-7">
             <section className="rounded-2xl border border-[#f0e2ec] bg-white p-5 shadow-sm sm:p-7">
@@ -1210,11 +1880,13 @@ export default function AdminPage() {
               </h2>
               <p className="mb-6 text-sm text-[#756574]">
                 Select a customer and add one or more products to their order.
+                Product discounts are included automatically.
               </p>
 
               {customers.length === 0 ? (
                 <p className="rounded-xl bg-[#fff8fc] p-4 text-sm text-[#756574]">
-                  No customer profiles found yet. Customers need to have a profile before you can create an order for them.
+                  No customer profiles found yet. Customers need to have a
+                  profile before you can create an order for them.
                 </p>
               ) : (
                 <form onSubmit={createOrder} className="space-y-5">
@@ -1282,15 +1954,31 @@ export default function AdminPage() {
                                     value={product.id}
                                     disabled={!product.is_active}
                                   >
-                                    {product.name} · {money(product.price)}
+                                    {product.name} ·{" "}
+                                    {money(discountedPrice(product))}
                                     {!product.is_active ? " (Hidden)" : ""}
                                   </option>
                                 ))}
                               </select>
+
                               {selectedProduct && (
-                                <p className="mt-1 text-xs text-[#756574]">
-                                  Unit price: {money(selectedProduct.price)}
-                                </p>
+                                <div className="mt-1 text-xs text-[#756574]">
+                                  {selectedProduct.discount_percent > 0 ? (
+                                    <>
+                                      <span className="line-through">
+                                        {money(selectedProduct.price)}
+                                      </span>
+                                      {"  "}
+                                      <strong className="text-green-700">
+                                        {money(discountedPrice(selectedProduct))}
+                                      </strong>
+                                      {"  "}
+                                      ({selectedProduct.discount_percent}% off)
+                                    </>
+                                  ) : (
+                                    <>Unit price: {money(selectedProduct.price)}</>
+                                  )}
+                                </div>
                               )}
                             </div>
 
@@ -1504,7 +2192,8 @@ export default function AdminPage() {
 
             {invoices.length === 0 ? (
               <div className="rounded-2xl bg-white p-8 text-center text-sm text-[#756574]">
-                No invoices created yet. You can create an invoice from an order.
+                No invoices created yet. You can create an invoice from an
+                order.
               </div>
             ) : (
               <div className="space-y-4">
@@ -1544,7 +2233,8 @@ export default function AdminPage() {
                       <p>
                         <span className="text-[#756574]">Order: </span>
                         <strong className="text-[#43243b]">
-                          {orderFor(invoice.order_id)?.order_number || "Not linked"}
+                          {orderFor(invoice.order_id)?.order_number ||
+                            "Not linked"}
                         </strong>
                       </p>
                       <p>
@@ -1595,7 +2285,8 @@ export default function AdminPage() {
 
             {receipts.length === 0 ? (
               <div className="rounded-2xl bg-white p-8 text-center text-sm text-[#756574]">
-                No receipts recorded yet. Record a payment from the Orders section.
+                No receipts recorded yet. Record a payment from the Orders
+                section.
               </div>
             ) : (
               <div className="space-y-4">
@@ -1631,7 +2322,8 @@ export default function AdminPage() {
                       <p>
                         <span className="text-[#756574]">Order: </span>
                         <strong className="text-[#43243b]">
-                          {orderFor(receipt.order_id)?.order_number || "Not linked"}
+                          {orderFor(receipt.order_id)?.order_number ||
+                            "Not linked"}
                         </strong>
                       </p>
                       <p>
@@ -1974,4 +2666,14 @@ export default function AdminPage() {
       )}
     </main>
   );
+}
+
+function GenUIcopyPromo(code: string) {
+  if (typeof navigator !== "undefined" && navigator.clipboard) {
+    navigator.clipboard.writeText(code).catch(() => {
+      window.prompt("Copy this promo code:", code);
+    });
+  } else if (typeof window !== "undefined") {
+    window.prompt("Copy this promo code:", code);
+  }
 }
