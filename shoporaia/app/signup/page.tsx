@@ -20,6 +20,8 @@ export default function SignupPage() {
   const [address, setAddress] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -68,195 +70,174 @@ export default function SignupPage() {
     );
   }
 
-  const inputStyle = {
-    width: "100%",
-    padding: "13px",
-    border: "1px solid #ddd",
-    borderRadius: "8px",
-    marginTop: "6px",
-    marginBottom: "16px",
-    fontSize: "15px",
-    boxSizing: "border-box" as const,
-  };
+  const inputClass =
+    "mt-2 mb-5 w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-[15px] text-gray-900 placeholder:text-gray-400 outline-none transition focus:border-[#bd668c] focus:ring-2 focus:ring-pink-100";
+
+  const labelClass = "block text-sm font-semibold text-gray-800";
 
   return (
-    <main style={{
-      minHeight: "100vh",
-      padding: "40px 20px",
-      background: "#fff8fb",
-    }}>
-      <div style={{
-        maxWidth: "500px",
-        margin: "auto",
-        background: "white",
-        padding: "30px 24px",
-        borderRadius: "14px",
-        boxShadow: "0 4px 20px rgba(0,0,0,0.06)",
-      }}>
-        <h1 style={{
-          textAlign: "center",
-          fontSize: "28px",
-          color: "#bd668c",
-          marginBottom: "8px",
-        }}>
-          Oraia by Dara
-        </h1>
+    <main className="min-h-screen bg-[#fff8fb] px-4 py-10 sm:py-14">
+      <div className="mx-auto max-w-lg">
+        <div className="rounded-3xl border border-pink-100 bg-white p-6 shadow-[0_12px_35px_rgba(112,43,80,0.08)] sm:p-9">
+          <div className="mb-8 text-center">
+            <Link href="/" className="text-3xl font-bold text-[#702b50]">
+              ORAIA <span className="text-gray-800">BY DARA</span>
+            </Link>
 
-        <h2 style={{ textAlign: "center", marginBottom: "8px" }}>
-          Create Your Account
-        </h2>
+            <h1 className="mt-5 text-2xl font-semibold text-gray-900">
+              Create Your Account
+            </h1>
 
-        <p style={{
-          textAlign: "center",
-          color: "#777",
-          marginBottom: "25px",
-        }}>
-          Join us and enjoy a seamless shopping experience.
-        </p>
-
-        <form onSubmit={handleSignup}>
-          <label>Full Name</label>
-          <input
-            style={inputStyle}
-            value={fullName}
-            onChange={(e) => setFullName(e.target.value)}
-            placeholder="Enter your full name"
-            required
-          />
-
-          <label>Username</label>
-          <input
-            style={inputStyle}
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            placeholder="Choose a username"
-            required
-          />
-
-          <label>Email Address</label>
-          <input
-            style={inputStyle}
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="Enter your email"
-            required
-          />
-
-          <label>Phone Number</label>
-          <input
-            style={inputStyle}
-            type="tel"
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-            placeholder="Enter your phone number"
-            required
-          />
-
-          <label>Country</label>
-          <input
-            style={{ ...inputStyle, background: "#f5f5f5" }}
-            value="Nigeria"
-            disabled
-          />
-
-          <label>State</label>
-          <input
-            style={inputStyle}
-            value={state}
-            onChange={(e) => setState(e.target.value)}
-            placeholder="Enter your state"
-            required
-          />
-
-          <label>City</label>
-          <input
-            style={inputStyle}
-            value={city}
-            onChange={(e) => setCity(e.target.value)}
-            placeholder="Enter your city"
-            required
-          />
-
-          <label>Delivery Address</label>
-          <textarea
-            style={{
-              ...inputStyle,
-              minHeight: "90px",
-              resize: "vertical",
-            }}
-            value={address}
-            onChange={(e) => setAddress(e.target.value)}
-            placeholder="Enter your full delivery address"
-            required
-          />
-
-          <label>Password</label>
-          <input
-            style={inputStyle}
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="Create a password"
-            minLength={8}
-            required
-          />
-
-          <label>Confirm Password</label>
-          <input
-            style={inputStyle}
-            type="password"
-            value={confirmPassword}
-            onChange={(e) => setConfirmPassword(e.target.value)}
-            placeholder="Enter your password again"
-            required
-          />
-
-          {message && (
-            <p style={{
-              padding: "12px",
-              background: "#fff0f5",
-              color: "#9b456a",
-              borderRadius: "8px",
-              marginBottom: "16px",
-              fontSize: "14px",
-            }}>
-              {message}
+            <p className="mt-2 text-sm text-gray-600">
+              Join us and enjoy a seamless shopping experience.
             </p>
-          )}
+          </div>
 
-          <button
-            type="submit"
-            disabled={loading}
-            style={{
-              width: "100%",
-              padding: "14px",
-              background: "#bd668c",
-              color: "white",
-              border: "none",
-              borderRadius: "8px",
-              fontSize: "16px",
-              fontWeight: "bold",
-              cursor: "pointer",
-            }}
-          >
-            {loading ? "Creating Account..." : "Create Account"}
-          </button>
-        </form>
+          <form onSubmit={handleSignup}>
+            <label className={labelClass}>Full Name</label>
+            <input
+              className={inputClass}
+              type="text"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              placeholder="Enter your full name"
+              required
+            />
 
-        <p style={{
-          textAlign: "center",
-          marginTop: "22px",
-          color: "#666",
-        }}>
-          Already have an account?{" "}
-          <Link href="/login" style={{
-            color: "#bd668c",
-            fontWeight: "bold",
-          }}>
-            Sign In
-          </Link>
-        </p>
+            <label className={labelClass}>Username</label>
+            <input
+              className={inputClass}
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="Choose a username"
+              required
+            />
+
+            <label className={labelClass}>Email Address</label>
+            <input
+              className={inputClass}
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="Enter your email"
+              required
+            />
+
+            <label className={labelClass}>Phone Number</label>
+            <input
+              className={inputClass}
+              type="tel"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              placeholder="Enter your phone number"
+              required
+            />
+
+            <label className={labelClass}>Country</label>
+            <input
+              className={`${inputClass} cursor-not-allowed bg-gray-50 text-gray-700`}
+              value="Nigeria"
+              disabled
+            />
+
+            <label className={labelClass}>State</label>
+            <input
+              className={inputClass}
+              type="text"
+              value={state}
+              onChange={(e) => setState(e.target.value)}
+              placeholder="Enter your state"
+              required
+            />
+
+            <label className={labelClass}>City</label>
+            <input
+              className={inputClass}
+              type="text"
+              value={city}
+              onChange={(e) => setCity(e.target.value)}
+              placeholder="Enter your city"
+              required
+            />
+
+            <label className={labelClass}>Delivery Address</label>
+            <textarea
+              className={`${inputClass} min-h-[100px] resize-y`}
+              value={address}
+              onChange={(e) => setAddress(e.target.value)}
+              placeholder="Enter your full delivery address"
+              required
+            />
+
+            <label className={labelClass}>Password</label>
+            <input
+              className={inputClass}
+              type={showPassword ? "text" : "password"}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Create a password"
+              minLength={8}
+              required
+            />
+
+            <label className="mb-5 flex cursor-pointer items-center gap-2 text-sm text-gray-700">
+              <input
+                type="checkbox"
+                checked={showPassword}
+                onChange={(e) => setShowPassword(e.target.checked)}
+                className="accent-[#702b50]"
+              />
+              Show password
+            </label>
+
+            <label className={labelClass}>Confirm Password</label>
+            <input
+              className={inputClass}
+              type={showConfirmPassword ? "text" : "password"}
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              placeholder="Enter your password again"
+              required
+            />
+
+            <label className="mb-5 flex cursor-pointer items-center gap-2 text-sm text-gray-700">
+              <input
+                type="checkbox"
+                checked={showConfirmPassword}
+                onChange={(e) =>
+                  setShowConfirmPassword(e.target.checked)
+                }
+                className="accent-[#702b50]"
+              />
+              Show confirmation password
+            </label>
+
+            {message && (
+              <p className="mb-5 rounded-xl bg-pink-50 p-4 text-sm leading-relaxed text-[#702b50]">
+                {message}
+              </p>
+            )}
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full rounded-xl bg-[#702b50] px-5 py-4 text-base font-semibold text-white shadow-md transition hover:-translate-y-0.5 hover:bg-[#57203d] hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {loading ? "Creating Account..." : "Create Account"}
+            </button>
+          </form>
+
+          <p className="mt-7 text-center text-sm text-gray-700">
+            Already have an account?{" "}
+            <Link
+              href="/login"
+              className="font-semibold text-[#702b50] hover:underline"
+            >
+              Sign In
+            </Link>
+          </p>
+        </div>
       </div>
     </main>
   );

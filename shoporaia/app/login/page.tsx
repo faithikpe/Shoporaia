@@ -55,19 +55,23 @@ export default function LoginPage() {
     if (error) setMessage(error.message);
   }
 
+  const inputClass =
+    "w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition focus:border-[#bd668c] focus:ring-2 focus:ring-pink-100";
+
   return (
-    <main className="min-h-screen bg-[#fffafc] px-4 py-12">
+    <main className="min-h-screen bg-[#fff8fb] px-4 py-12">
       <div className="mx-auto max-w-md">
         <div className="mb-8 text-center">
           <a href="/" className="text-3xl font-bold text-[#702b50]">
             ORAIA <span className="text-gray-800">BY DARA</span>
           </a>
-          <p className="mt-3 text-sm text-gray-500">
+
+          <p className="mt-3 text-sm text-gray-600">
             Welcome back. Sign in to your account.
           </p>
         </div>
 
-        <div className="rounded-3xl border border-pink-100 bg-white p-7 shadow-sm sm:p-9">
+        <div className="rounded-3xl border border-pink-100 bg-white p-7 shadow-[0_12px_35px_rgba(112,43,80,0.08)] sm:p-9">
           <h1 className="text-2xl font-semibold text-gray-900">
             Customer sign in
           </h1>
@@ -75,50 +79,55 @@ export default function LoginPage() {
           <button
             type="button"
             onClick={handleGoogleLogin}
-            className="mt-7 w-full rounded-xl border border-gray-200 px-5 py-3 font-medium text-gray-700 hover:bg-gray-50"
+            className="mt-7 w-full rounded-xl border border-gray-200 bg-white px-5 py-3 font-medium text-gray-800 transition hover:bg-gray-50"
           >
             Continue with Google
           </button>
 
           <div className="my-6 flex items-center gap-3">
             <div className="h-px flex-1 bg-gray-200" />
-            <span className="text-xs text-gray-400">OR SIGN IN WITH EMAIL</span>
+            <span className="text-xs font-medium text-gray-500">
+              OR SIGN IN WITH EMAIL
+            </span>
             <div className="h-px flex-1 bg-gray-200" />
           </div>
 
           <form onSubmit={handleLogin} className="space-y-5">
             <div>
-              <label className="mb-2 block text-sm font-medium text-gray-700">
+              <label className="mb-2 block text-sm font-medium text-gray-800">
                 Email address
               </label>
+
               <input
                 required
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="Enter your email"
-                className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm outline-none focus:border-pink-400"
+                className={inputClass}
               />
             </div>
 
             <div>
-              <label className="mb-2 block text-sm font-medium text-gray-700">
+              <label className="mb-2 block text-sm font-medium text-gray-800">
                 Password
               </label>
+
               <input
                 required
                 type={showPassword ? "text" : "password"}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Enter your password"
-                className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm outline-none focus:border-pink-400"
+                className={inputClass}
               />
 
-              <label className="mt-3 flex items-center gap-2 text-sm text-gray-500">
+              <label className="mt-3 flex cursor-pointer items-center gap-2 text-sm text-gray-700">
                 <input
                   type="checkbox"
                   checked={showPassword}
                   onChange={(e) => setShowPassword(e.target.checked)}
+                  className="accent-[#702b50]"
                 />
                 Show password
               </label>
@@ -142,13 +151,13 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full rounded-xl bg-[#702b50] px-5 py-4 font-semibold text-white hover:bg-[#57203d] disabled:opacity-60"
+              className="w-full rounded-xl bg-[#702b50] px-5 py-4 font-semibold text-white shadow-md transition hover:-translate-y-0.5 hover:bg-[#57203d] hover:shadow-lg disabled:opacity-60"
             >
               {loading ? "Signing in..." : "Sign in"}
             </button>
           </form>
 
-          <p className="mt-6 text-center text-sm text-gray-600">
+          <p className="mt-6 text-center text-sm text-gray-700">
             Don't have an account?{" "}
             <a
               href="/signup"
