@@ -149,6 +149,18 @@ export default function Home() {
   const [checkingOut, setCheckingOut] = useState(false);
   const [checkoutError, setCheckoutError] = useState("");
 
+  // Order request form
+  const [customerName, setCustomerName] = useState("");
+  const [customerPhone, setCustomerPhone] = useState("");
+  const [customerEmail, setCustomerEmail] = useState("");
+  const [deliveryPreference, setDeliveryPreference] = useState("Pickup");
+  const [customerNote, setCustomerNote] = useState("");
+
+  // Order confirmation
+  const [orderSubmitted, setOrderSubmitted] = useState(false);
+  const [submittedOrderNumber, setSubmittedOrderNumber] = useState("");
+  const [submittedWhatsAppUrl, setSubmittedWhatsAppUrl] = useState("");
+
   // Load saved cart and wishlist
   useEffect(() => {
     try {
@@ -228,7 +240,6 @@ export default function Home() {
     setAccountDropdown(false);
     setUser(null);
 
-    // Keep the customer's saved cart and wishlist
     router.push("/");
     router.refresh();
 
@@ -350,6 +361,7 @@ export default function Home() {
     });
 
     setCheckoutError("");
+    setOrderSubmitted(false);
     setShowWishlist(false);
     setShowCart(true);
   }
@@ -389,7 +401,7 @@ export default function Home() {
     toggleWishlist(productId);
   }
 
-  // Submit order to Supabase and continue to WhatsApp
+  // Submit order request to Supabase
   async function handleCheckout() {
     setCheckoutError("");
 
@@ -404,6 +416,16 @@ export default function Home() {
       return;
     }
 
+    if (!customerName.trim() || !customerPhone.trim()) {
+      setCheckoutError("Please enter your name and phone number.");
+      return;
+    }
+
+    if (customerEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail.trim())) {
+      setCheckoutError("Please enter a valid email address.");
+      return;
+    }
+
     setCheckingOut(true);
 
     try {
@@ -414,12 +436,17 @@ export default function Home() {
         .insert({
           user_id: user.id,
           order_number: orderNumber,
-          order_status: "Pending confirmation",
-          payment_status: "Unpaid",
+          order_status: "PENDING",
+          payment_status: "UNPAID",
           subtotal: cartTotal,
           total_amount: cartTotal,
           currency: "NGN",
           shipping_status: "Not shipped",
+          customer_name: customerName.trim(),
+          customer_phone: customerPhone.trim(),
+          customer_email: customerEmail.trim() || null,
+          delivery_preference: deliveryPreference,
+          customer_note: customerNote.trim() || null,
         })
         .select("id, order_number")
         .single();
@@ -442,10 +469,14 @@ export default function Home() {
       if (itemsError) throw itemsError;
 
       const messageLines = [
-        "Hello Oraia by Dara! I would like to place an order.",
+        "Hello Oraia by Dara! I have submitted an order request.",
         "",
         `Order number: ${order.order_number}`,
+        `Name: ${customerName.trim()}`,
+        `Phone: ${customerPhone.trim()}`,
+        `Delivery preference: ${deliveryPreference}`,
         "",
+        "Order details:",
         ...cartProducts.map(
           (product, index) =>
             `${index + 1}. ${product.name} x ${product.quantity} = ${formatPrice(
@@ -453,10 +484,11 @@ export default function Home() {
             )} (${product.stock ? "In Nigeria" : "China Preorder"})`
         ),
         "",
-        `Total product amount: ${formatPrice(cartTotal)}`,
+        `Product total: ${formatPrice(cartTotal)}`,
+        customerNote.trim() ? `Note: ${customerNote.trim()}` : "",
         "",
-        "Please confirm availability and send me the payment details.",
-      ];
+        "Please confirm my order and let me know the next steps.",
+      ].filter(Boolean);
 
       const whatsappMessage = encodeURIComponent(
         messageLines.join("\n")
@@ -464,11 +496,18 @@ export default function Home() {
 
       const whatsappUrl = `https://wa.me/${WHATSAPP_NUMBER}?text=${whatsappMessage}`;
 
-      // Clear cart only after order and items have been saved
+      setSubmittedOrderNumber(order.order_number);
+      setSubmittedWhatsAppUrl(whatsappUrl);
+      setOrderSubmitted(true);
+
       setCart([]);
       localStorage.removeItem("oraia_cart");
 
-      window.location.href = whatsappUrl;
+      setCustomerName("");
+      setCustomerPhone("");
+      setCustomerEmail("");
+      setDeliveryPreference("Pickup");
+      setCustomerNote("");
     } catch (err) {
       setCheckoutError(
         err instanceof Error
@@ -663,7 +702,7 @@ export default function Home() {
             </div>
 
             <div className="flex-1 overflow-y-auto p-6">
-              {cartProducts.length === 0 ? (
+              {cartProducts.length === 0 && !orderSubmitted ? (
                 <div className="py-16 text-center">
                   <p className="text-4xl text-[#b47c9c]">♡</p>
                   <h3 className="mt-4 font-semibold text-[#40253f]">
@@ -752,7 +791,59 @@ export default function Home() {
               )}
             </div>
 
-            {cartProducts.length > 0 && (
+            {orderSubmitted ? (
+              <div className="border-t border-pink-100 p-6">
+                <div className="py-5 text-center">
+                  <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-green-50 text-3xl text-green-600">
+                    ✓
+                  </div>
+
+                  <h3 className="mt-5 text-xl font-semibold text-[#40253f]">
+                    Order Request Submitted!
+                  </h3>
+
+                  <p className="mt-3 text-sm leading-6 text-gray-500">
+                    Thank you for shopping with Oraia by Dara. Your order
+                    request has been received successfully.
+                  </p>
+
+                  <div className="mt-5 rounded-xl bg-[#fcf7fa] p-4">
+                    <p className="text-xs text-gray-500">
+                      Your order number
+                    </p>
+                    <p className="mt-2 text-lg font-bold text-[#40253f]">
+                      {submittedOrderNumber}
+                    </p>
+                    <p className="mt-3 text-xs leading-5 text-gray-500">
+                      Our team will contact you to confirm availability,
+                      final details and payment arrangements. No payment
+                      has been made.
+                    </p>
+                  </div>
+
+                  <a
+                    href={submittedWhatsAppUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-5 block w-full rounded-full bg-[#40253f] px-6 py-4 text-sm font-semibold text-white hover:bg-[#70466b]"
+                  >
+                    Follow Up on WhatsApp
+                  </a>
+
+                  <button
+                    onClick={() => {
+                      setOrderSubmitted(false);
+                      setSubmittedOrderNumber("");
+                      setSubmittedWhatsAppUrl("");
+                      setShowCart(false);
+                    }}
+                    className="mt-3 w-full rounded-full border border-[#40253f] px-6 py-3 text-sm text-[#40253f]"
+                  >
+                    Continue Shopping
+                  </button>
+                </div>
+              </div>
+            ) : cartProducts.length > 0 ? (
               <div className="border-t border-pink-100 p-6">
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-500">Product total</span>
@@ -764,6 +855,86 @@ export default function Home() {
                 <p className="mt-3 text-xs leading-5 text-gray-500">
                   Shipping charges, where applicable, will be confirmed separately.
                 </p>
+
+                <div className="mt-5 space-y-4">
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-[#40253f]">
+                      Full Name *
+                    </label>
+                    <input
+                      type="text"
+                      value={customerName}
+                      onChange={(event) =>
+                        setCustomerName(event.target.value)
+                      }
+                      placeholder="Enter your full name"
+                      className="w-full rounded-xl border border-pink-200 px-4 py-3 text-sm outline-none focus:border-[#40253f]"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-[#40253f]">
+                      Phone / WhatsApp Number *
+                    </label>
+                    <input
+                      type="tel"
+                      value={customerPhone}
+                      onChange={(event) =>
+                        setCustomerPhone(event.target.value)
+                      }
+                      placeholder="Enter your phone number"
+                      className="w-full rounded-xl border border-pink-200 px-4 py-3 text-sm outline-none focus:border-[#40253f]"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-[#40253f]">
+                      Email Address (Optional)
+                    </label>
+                    <input
+                      type="email"
+                      value={customerEmail}
+                      onChange={(event) =>
+                        setCustomerEmail(event.target.value)
+                      }
+                      placeholder="Enter your email address"
+                      className="w-full rounded-xl border border-pink-200 px-4 py-3 text-sm outline-none focus:border-[#40253f]"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-[#40253f]">
+                      Delivery Preference *
+                    </label>
+                    <select
+                      value={deliveryPreference}
+                      onChange={(event) =>
+                        setDeliveryPreference(event.target.value)
+                      }
+                      className="w-full rounded-xl border border-pink-200 bg-white px-4 py-3 text-sm outline-none focus:border-[#40253f]"
+                    >
+                      <option value="Pickup">Pickup</option>
+                      <option value="Paid delivery">Paid delivery</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-[#40253f]">
+                      Additional Note (Optional)
+                    </label>
+                    <textarea
+                      value={customerNote}
+                      onChange={(event) =>
+                        setCustomerNote(event.target.value)
+                      }
+                      placeholder="Any additional information about your order?"
+                      rows={3}
+                      className="w-full rounded-xl border border-pink-200 px-4 py-3 text-sm outline-none focus:border-[#40253f]"
+                    />
+                  </div>
+                </div>
 
                 {checkoutError && (
                   <p className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-600">
@@ -777,9 +948,14 @@ export default function Home() {
                   className="mt-5 w-full rounded-full bg-[#40253f] px-6 py-4 text-sm font-semibold text-white hover:bg-[#70466b] disabled:opacity-50"
                 >
                   {checkingOut
-                    ? "Submitting Your Order..."
-                    : "Proceed to WhatsApp Checkout"}
+                    ? "Submitting Order Request..."
+                    : "Submit Order Request"}
                 </button>
+
+                <p className="mt-3 text-center text-xs leading-5 text-gray-500">
+                  This is an order request, not a payment. Our team will
+                  contact you to confirm your order and arrange payment.
+                </p>
 
                 <button
                   onClick={() => setShowCart(false)}
@@ -788,7 +964,7 @@ export default function Home() {
                   Continue Shopping
                 </button>
               </div>
-            )}
+            ) : null}
           </div>
         </div>
       )}
@@ -1021,8 +1197,9 @@ export default function Home() {
             China Preorder Collection
           </h2>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-gray-500">
-            Explore products sourced from China. Product payment is made
-            through WhatsApp checkout. International shipping is calculated
+            Explore products sourced from China. Submit an order request
+            through our website. Our team will contact you to confirm your
+            order and arrange payment. International shipping is calculated
             and paid separately after your goods arrive in Nigeria.
           </p>
         </div>
@@ -1328,8 +1505,8 @@ export default function Home() {
               ],
               [
                 "02",
-                "Confirm Your Order",
-                "Send your order through WhatsApp and receive payment details.",
+                "Submit Your Order Request",
+                "Complete the order form and wait for our team to confirm your order.",
               ],
               [
                 "03",
