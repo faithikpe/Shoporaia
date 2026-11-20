@@ -14,6 +14,7 @@ export default function PaymentCallbackPage() {
     async function verifyPayment() {
       const params = new URLSearchParams(window.location.search);
       const reference = params.get("reference");
+      const paymentType = params.get("payment_type");
 
       if (!reference) {
         setStatus("error");
@@ -21,14 +22,21 @@ export default function PaymentCallbackPage() {
         return;
       }
 
+      const isShippingPayment = paymentType === "shipping";
+
       try {
-        const response = await fetch("/api/paystack/verify", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ reference }),
-        });
+        const response = await fetch(
+          isShippingPayment
+            ? "/api/paystack/shipping/verify"
+            : "/api/paystack/verify",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ reference }),
+          }
+        );
 
         const result = await response.json();
 
@@ -39,8 +47,11 @@ export default function PaymentCallbackPage() {
         }
 
         setStatus("success");
+
         setMessage(
-          "Your payment has been confirmed successfully. Thank you for shopping with Oraia by Dara."
+          isShippingPayment
+            ? "Your shipping fee payment has been confirmed successfully. Thank you for shopping with Oraia by Dara."
+            : "Your payment has been confirmed successfully. Thank you for shopping with Oraia by Dara."
         );
       } catch (error) {
         setStatus("error");
@@ -97,10 +108,10 @@ export default function PaymentCallbackPage() {
 
         {status !== "loading" && (
           <a
-            href="/account"
+            href="/account#orders"
             className="mt-8 inline-block w-full rounded-full bg-gradient-to-br from-[#51324f] to-[#40253f] px-6 py-4 text-sm font-semibold text-white shadow-md transition hover:-translate-y-1 hover:shadow-lg"
           >
-            Go to My Account
+            Go to My Orders
           </a>
         )}
 

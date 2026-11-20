@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
@@ -55,6 +54,10 @@ type CustomerOrder = {
   tracking_number: string | null;
   shipping_carrier: string | null;
   shipping_notes: string | null;
+  shipping_fee: number;
+  shipping_payment_status: string | null;
+  shipping_payment_reference: string | null;
+  shipping_paid_at: string | null;
   subtotal: number;
   total_amount: number;
   currency: string | null;
@@ -243,6 +246,8 @@ export default function AccountPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [payingOrderId, setPayingOrderId] = useState<string | null>(null);
+  const [payingShippingOrderId, setPayingShippingOrderId] =
+    useState<string | null>(null);
   const [downloadingReceiptId, setDownloadingReceiptId] =
     useState<string | null>(null);
 
@@ -654,6 +659,61 @@ export default function AccountPage() {
           : "Unable to continue payment. Please try again."
       );
       setPayingOrderId(null);
+    }
+  }
+
+  async function continueShippingPayment(orderId: string) {
+    if (payingShippingOrderId) return;
+
+    setError("");
+    setMessage("");
+    setPayingShippingOrderId(orderId);
+
+    try {
+      const {
+        data: sessionData,
+        error: sessionError,
+      } = await supabase.auth.getSession();
+
+      if (sessionError) throw sessionError;
+
+      const accessToken = sessionData.session?.access_token;
+
+      if (!accessToken) {
+        throw new Error(
+          "Your login session has expired. Please log in again."
+        );
+      }
+
+      const response = await fetch(
+        "/api/paystack/shipping/initialize",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({ orderId }),
+        }
+      );
+
+      const result = await response.json();
+
+      if (!response.ok || !result.authorization_url) {
+        throw new Error(
+          result.error || "Unable to initialize shipping payment."
+        );
+      }
+
+      window.location.assign(result.authorization_url);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to continue shipping payment. Please try again."
+      );
+
+      setPayingShippingOrderId(null);
     }
   }
 
@@ -1538,6 +1598,69 @@ export default function AccountPage() {
                           )}
                         </div>
                       )}
+
+                      {/* SHIPPING PAYMENT */}
+                      {Number(order.shipping_fee || 0) > 0 && (
+                        <div className="mt-4 rounded-xl border border-[#eadce6] bg-[#fff8fc] p-5">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div>
+                              <h4 className="font-bold text-[#43243b]">
+                                Shipping Payment
+                              </h4>
+
+                              <p className="mt-2 text-sm text-[#756574]">
+                                Shipping Fee
+                              </p>
+
+                              <p className="mt-1 text-xl font-bold text-[#43243b]">
+                                {formatMoney(
+                                  Number(order.shipping_fee),
+                                  order.currency || "NGN"
+                                )}
+                              </p>
+                            </div>
+
+                            <span
+                              className={`rounded-full px-3 py-1 text-xs font-semibold ${statusStyle(
+                                order.shipping_payment_status || "Pending"
+                              )}`}
+                            >
+                              {order.shipping_payment_status || "Pending"}
+                            </span>
+                          </div>
+
+                          {order.shipping_payment_status?.toLowerCase() ===
+                          "paid" ? (
+                            <p className="mt-4 rounded-lg bg-green-50 p-3 text-sm font-medium text-green-700">
+                              Shipping payment completed.
+                              {order.shipping_paid_at && (
+                                <span className="mt-1 block text-xs">
+                                  Paid on {formatDate(order.shipping_paid_at)}
+                                </span>
+                              )}
+                            </p>
+                          ) : order.order_status
+                              ?.toLowerCase()
+                              .includes("cancel") ? (
+                            <p className="mt-4 text-sm text-red-600">
+                              Shipping payment is unavailable for this
+                              cancelled order.
+                            </p>
+                          ) : (
+                            <button
+                              onClick={() =>
+                                continueShippingPayment(order.id)
+                              }
+                              disabled={payingShippingOrderId !== null}
+                              className="mt-4 w-full rounded-xl bg-[#75436d] px-6 py-3 text-sm font-semibold text-white transition hover:bg-[#603657] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+                            >
+                              {payingShippingOrderId === order.id
+                                ? "Redirecting to payment..."
+                                : "Pay Shipping Fee"}
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </div>
                   ))
                 )}
@@ -1651,7 +1774,8 @@ export default function AccountPage() {
                     My Receipts
                   </h2>
                   <p className="mt-1 text-sm text-[#756574]">
-                    View your recorded payments and download your official Oraia receipts.
+                    View your recorded payments and download your official
+                    Oraia receipts.
                   </p>
                 </div>
 
