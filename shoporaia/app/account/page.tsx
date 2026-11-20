@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
@@ -242,6 +243,9 @@ export default function AccountPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [payingOrderId, setPayingOrderId] = useState<string | null>(null);
+  const [downloadingReceiptId, setDownloadingReceiptId] =
+    useState<string | null>(null);
+
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
@@ -650,6 +654,91 @@ export default function AccountPage() {
           : "Unable to continue payment. Please try again."
       );
       setPayingOrderId(null);
+    }
+  }
+
+  async function downloadReceipt(
+    receiptId: string,
+    receiptNumber: string
+  ) {
+    if (downloadingReceiptId) return;
+
+    setError("");
+    setMessage("");
+    setDownloadingReceiptId(receiptId);
+
+    let downloadUrl: string | null = null;
+
+    try {
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
+
+      if (sessionError) throw sessionError;
+
+      const accessToken = session?.access_token;
+
+      if (!accessToken) {
+        throw new Error(
+          "Your session has expired. Please log in again."
+        );
+      }
+
+      const response = await fetch(
+        `/api/receipts/${encodeURIComponent(receiptId)}`,
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        }
+      );
+
+      if (!response.ok) {
+        let errorMessage = "Unable to download receipt.";
+
+        try {
+          const result = await response.json();
+          errorMessage = result.error || errorMessage;
+        } catch {
+          // Keep the default error message if the response is not JSON.
+        }
+
+        throw new Error(errorMessage);
+      }
+
+      const blob = await response.blob();
+
+      if (!blob.size) {
+        throw new Error("The receipt PDF appears to be empty.");
+      }
+
+      downloadUrl = URL.createObjectURL(blob);
+
+      const link = document.createElement("a");
+      link.href = downloadUrl;
+      link.download = `Oraia-Receipt-${receiptNumber}.pdf`;
+
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+
+      setMessage("Your receipt has been downloaded successfully.");
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to download receipt. Please try again."
+      );
+    } finally {
+      if (downloadUrl) {
+        window.setTimeout(() => {
+          URL.revokeObjectURL(downloadUrl!);
+        }, 1000);
+      }
+
+      setDownloadingReceiptId(null);
     }
   }
 
@@ -1562,7 +1651,7 @@ export default function AccountPage() {
                     My Receipts
                   </h2>
                   <p className="mt-1 text-sm text-[#756574]">
-                    View your recorded payments and receipts.
+                    View your recorded payments and download your official Oraia receipts.
                   </p>
                 </div>
 
@@ -1645,10 +1734,18 @@ export default function AccountPage() {
                       )}
 
                       <button
-                        onClick={printDocument}
-                        className="mt-4 rounded-lg border border-[#eadce6] px-4 py-2 text-sm font-semibold text-[#75436d] hover:bg-[#f9edf5]"
+                        onClick={() =>
+                          downloadReceipt(
+                            receipt.id,
+                            receipt.receipt_number
+                          )
+                        }
+                        disabled={downloadingReceiptId !== null}
+                        className="mt-4 rounded-lg bg-[#75436d] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#603657] disabled:cursor-not-allowed disabled:opacity-60"
                       >
-                        Print Receipt
+                        {downloadingReceiptId === receipt.id
+                          ? "Generating PDF..."
+                          : "Download PDF Receipt"}
                       </button>
                     </div>
                   ))
