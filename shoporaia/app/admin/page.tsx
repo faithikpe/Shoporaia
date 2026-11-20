@@ -67,6 +67,9 @@ type Order = {
   tracking_number: string | null;
   shipping_carrier: string | null;
   shipping_notes: string | null;
+  shipping_tracking_url: string | null;
+  shipping_dispatch_date: string | null;
+  shipping_estimated_delivery: string | null;
   shipping_fee: number;
   shipping_payment_status: string;
   shipping_payment_reference: string | null;
@@ -267,6 +270,9 @@ export default function AdminPage() {
     tracking_number: "",
     shipping_carrier: "",
     shipping_notes: "",
+    shipping_tracking_url: "",
+    shipping_dispatch_date: "",
+    shipping_estimated_delivery: "",
     shipping_fee: "0",
   });
 
@@ -991,6 +997,13 @@ export default function AdminPage() {
       tracking_number: order.tracking_number || "",
       shipping_carrier: order.shipping_carrier || "",
       shipping_notes: order.shipping_notes || "",
+      shipping_tracking_url: order.shipping_tracking_url || "",
+      shipping_dispatch_date: order.shipping_dispatch_date
+        ? order.shipping_dispatch_date.slice(0, 10)
+        : "",
+      shipping_estimated_delivery: order.shipping_estimated_delivery
+        ? order.shipping_estimated_delivery.slice(0, 10)
+        : "",
       shipping_fee: String(order.shipping_fee || 0),
     });
   }
@@ -1004,6 +1017,14 @@ export default function AdminPage() {
 
     if (!Number.isFinite(shippingFee) || shippingFee < 0) {
       setMessage("Enter a valid shipping fee.");
+      return;
+    }
+
+    if (
+      orderUpdate.shipping_tracking_url.trim() &&
+      !/^https?:\/\/.+/i.test(orderUpdate.shipping_tracking_url.trim())
+    ) {
+      setMessage("Enter a valid tracking link beginning with https:// or http://.");
       return;
     }
 
@@ -1037,9 +1058,15 @@ export default function AdminPage() {
         order_status: orderUpdate.order_status,
         payment_status: orderUpdate.payment_status,
         shipping_status: orderUpdate.shipping_status,
-        tracking_number: orderUpdate.tracking_number,
-        shipping_carrier: orderUpdate.shipping_carrier,
-        shipping_notes: orderUpdate.shipping_notes,
+        tracking_number: orderUpdate.tracking_number.trim() || null,
+        shipping_carrier: orderUpdate.shipping_carrier.trim() || null,
+        shipping_notes: orderUpdate.shipping_notes.trim() || null,
+        shipping_tracking_url:
+          orderUpdate.shipping_tracking_url.trim() || null,
+        shipping_dispatch_date:
+          orderUpdate.shipping_dispatch_date || null,
+        shipping_estimated_delivery:
+          orderUpdate.shipping_estimated_delivery || null,
         shipping_fee: shippingFee,
         shipping_payment_status: shippingPaymentStatus,
         ...(feeChanged ? { shipping_payment_reference: null } : {}),
@@ -2208,6 +2235,44 @@ export default function AdminPage() {
                         </p>
                       </div>
 
+                      {(order.shipping_dispatch_date ||
+                        order.shipping_estimated_delivery) && (
+                        <div className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
+                          {order.shipping_dispatch_date && (
+                            <p>
+                              <span className="text-[#756574]">
+                                Dispatch Date:{" "}
+                              </span>
+                              <strong className="text-[#43243b]">
+                                {dateText(order.shipping_dispatch_date)}
+                              </strong>
+                            </p>
+                          )}
+
+                          {order.shipping_estimated_delivery && (
+                            <p>
+                              <span className="text-[#756574]">
+                                Estimated Delivery:{" "}
+                              </span>
+                              <strong className="text-[#43243b]">
+                                {dateText(order.shipping_estimated_delivery)}
+                              </strong>
+                            </p>
+                          )}
+                        </div>
+                      )}
+
+                      {order.shipping_tracking_url && (
+                        <a
+                          href={order.shipping_tracking_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="mt-3 inline-block text-sm font-semibold text-[#75436d] underline"
+                        >
+                          Open Tracking Link
+                        </a>
+                      )}
+
                       {order.shipping_notes && (
                         <p className="mt-3 rounded-lg bg-[#fff8fc] p-3 text-sm text-[#493a49]">
                           {order.shipping_notes}
@@ -2594,6 +2659,56 @@ export default function AdminPage() {
                     })
                   }
                   placeholder="Enter tracking number"
+                />
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className={labelStyle}>Tracking Website Link</label>
+                <input
+                  type="url"
+                  className={inputStyle}
+                  value={orderUpdate.shipping_tracking_url}
+                  onChange={(e) =>
+                    setOrderUpdate({
+                      ...orderUpdate,
+                      shipping_tracking_url: e.target.value,
+                    })
+                  }
+                  placeholder="https://example.com/track"
+                />
+                <p className="mt-1 text-xs text-[#756574]">
+                  Paste the carrier's tracking page link. Customers can open
+                  this link from their account.
+                </p>
+              </div>
+
+              <div>
+                <label className={labelStyle}>Dispatch Date</label>
+                <input
+                  type="date"
+                  className={inputStyle}
+                  value={orderUpdate.shipping_dispatch_date}
+                  onChange={(e) =>
+                    setOrderUpdate({
+                      ...orderUpdate,
+                      shipping_dispatch_date: e.target.value,
+                    })
+                  }
+                />
+              </div>
+
+              <div>
+                <label className={labelStyle}>Estimated Delivery Date</label>
+                <input
+                  type="date"
+                  className={inputStyle}
+                  value={orderUpdate.shipping_estimated_delivery}
+                  onChange={(e) =>
+                    setOrderUpdate({
+                      ...orderUpdate,
+                      shipping_estimated_delivery: e.target.value,
+                    })
+                  }
                 />
               </div>
 
