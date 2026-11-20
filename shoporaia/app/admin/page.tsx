@@ -1,4 +1,3 @@
- 
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
@@ -68,6 +67,10 @@ type Order = {
   tracking_number: string | null;
   shipping_carrier: string | null;
   shipping_notes: string | null;
+  shipping_fee: number;
+  shipping_payment_status: string;
+  shipping_payment_reference: string | null;
+  shipping_paid_at: string | null;
 };
 
 type Invoice = {
@@ -264,6 +267,7 @@ export default function AdminPage() {
     tracking_number: "",
     shipping_carrier: "",
     shipping_notes: "",
+    shipping_fee: "0",
   });
 
   const [receiptOrder, setReceiptOrder] = useState<Order | null>(null);
@@ -987,28 +991,68 @@ export default function AdminPage() {
       tracking_number: order.tracking_number || "",
       shipping_carrier: order.shipping_carrier || "",
       shipping_notes: order.shipping_notes || "",
+      shipping_fee: String(order.shipping_fee || 0),
     });
   }
 
   async function saveOrderUpdate(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+
     if (!editingOrder) return;
+
+    const shippingFee = Number(orderUpdate.shipping_fee);
+
+    if (!Number.isFinite(shippingFee) || shippingFee < 0) {
+      setMessage("Enter a valid shipping fee.");
+      return;
+    }
+
+    const previousFee = Number(editingOrder.shipping_fee || 0);
+
+    if (
+      editingOrder.shipping_payment_status === "Paid" &&
+      shippingFee !== previousFee
+    ) {
+      setMessage(
+        "This shipping fee has already been paid and cannot be changed."
+      );
+      return;
+    }
 
     setLoading(true);
     setMessage("");
 
+    const shippingPaymentStatus =
+      shippingFee <= 0
+        ? "Not required"
+        : editingOrder.shipping_payment_status === "Paid"
+          ? "Paid"
+          : "Pending";
+
+    const feeChanged = shippingFee !== previousFee;
+
     const { error } = await supabase
       .from("customer_orders")
       .update({
-        ...orderUpdate,
-        updated_at: new Date().toISOString(),
+        order_status: orderUpdate.order_status,
+        payment_status: orderUpdate.payment_status,
+        shipping_status: orderUpdate.shipping_status,
+        tracking_number: orderUpdate.tracking_number,
+        shipping_carrier: orderUpdate.shipping_carrier,
+        shipping_notes: orderUpdate.shipping_notes,
+        shipping_fee: shippingFee,
+        shipping_payment_status: shippingPaymentStatus,
+        ...(feeChanged ? { shipping_payment_reference: null } : {}),
+        update_at: new Date().toISOString(),
       })
       .eq("id", editingOrder.id);
 
     if (error) {
       setMessage("Could not update order: " + error.message);
     } else {
-      setMessage(`Order ${editingOrder.order_number} updated successfully.`);
+      setMessage(
+        `Order ${editingOrder.order_number} updated successfully.`
+      );
       setEditingOrder(null);
       await loadOrders();
     }
@@ -1091,7 +1135,7 @@ export default function AdminPage() {
             amount >= Number(receiptOrder.total_amount)
               ? "Paid"
               : "Partially paid",
-          updated_at: new Date().toISOString(),
+          update_at: new Date().toISOString(),
         })
         .eq("id", receiptOrder.id);
 
@@ -2116,6 +2160,33 @@ export default function AdminPage() {
                         ))}
                       </div>
 
+                      <div className="mb-4 rounded-xl bg-[#f9edf5] p-4">
+                        <p className="text-sm text-[#756574]">
+                          Customer Shipping Fee
+                        </p>
+
+                        <p className="mt-1 text-xl font-bold text-[#43243b]">
+                          {money(
+                            Number(order.shipping_fee || 0),
+                            order.currency
+                          )}
+                        </p>
+
+                        <span
+                          className={`mt-2 inline-block rounded-full px-3 py-1 text-xs font-semibold ${statusClass(
+                            order.shipping_payment_status
+                          )}`}
+                        >
+                          {order.shipping_payment_status || "Not required"}
+                        </span>
+
+                        {order.shipping_paid_at && (
+                          <p className="mt-2 text-xs text-[#756574]">
+                            Paid on: {dateTimeText(order.shipping_paid_at)}
+                          </p>
+                        )}
+                      </div>
+
                       <div className="grid gap-3 text-sm sm:grid-cols-3">
                         <p>
                           <span className="text-[#756574]">Shipping: </span>
@@ -2380,6 +2451,47 @@ export default function AdminPage() {
             </p>
 
             <div className="grid gap-4 sm:grid-cols-2">
+              <div className="sm:col-span-2 rounded-xl border border-[#eadce6] bg-[#fff8fc] p-4">
+                <label className={labelStyle}>
+                  Customer Shipping Fee (₦)
+                </label>
+
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  className={inputStyle}
+                  value={orderUpdate.shipping_fee}
+                  disabled={
+                    editingOrder.shipping_payment_status === "Paid"
+                  }
+                  onChange={(e) =>
+                    setOrderUpdate({
+                      ...orderUpdate,
+                      shipping_fee: e.target.value,
+                    })
+                  }
+                  placeholder="Enter shipping fee"
+                />
+
+                <p className="mt-2 text-xs text-[#756574]">
+                  Enter the shipping amount the customer needs to pay
+                  separately. The customer will see this amount in their
+                  account.
+                </p>
+
+                <p className="mt-2 text-sm font-semibold text-[#43243b]">
+                  Shipping Payment Status:{" "}
+                  {editingOrder.shipping_payment_status || "Not required"}
+                </p>
+
+                {editingOrder.shipping_payment_status === "Paid" && (
+                  <p className="mt-1 text-xs text-green-700">
+                    This shipping fee has already been paid.
+                  </p>
+                )}
+              </div>
+
               <div>
                 <label className={labelStyle}>Order Status</label>
                 <select
