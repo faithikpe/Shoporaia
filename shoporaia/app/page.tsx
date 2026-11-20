@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useEffect, useState } from "react";
@@ -23,6 +22,7 @@ type Product = {
   name: string;
   category: string;
   price: number;
+  discount_percent: number;
   origin: string;
   image: string;
   stock: boolean;
@@ -33,6 +33,19 @@ type Product = {
 type CartItem = {
   productId: string;
   quantity: number;
+};
+
+type PromoCode = {
+  id: string;
+  code: string;
+  discount_type: "percentage" | "fixed";
+  discount_value: number;
+  minimum_order_amount: number;
+  starts_at: string | null;
+  expires_at: string | null;
+  usage_limit: number | null;
+  usage_count: number;
+  is_active: boolean;
 };
 
 const categories = [
@@ -50,7 +63,37 @@ const categories = [
 ];
 
 function formatPrice(price: number) {
-  return `₦${price.toLocaleString("en-NG")}`;
+  return `₦${price.toLocaleString("en-NG", {
+    minimumFractionDigits: price % 1 === 0 ? 0 : 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+function discountedPrice(product: Product) {
+  const percent = Math.min(
+    100,
+    Math.max(0, Number(product.discount_percent) || 0)
+  );
+
+  return Math.round(product.price * (1 - percent / 100) * 100) / 100;
+}
+
+function calculatePromoDiscount(
+  promo: PromoCode | null,
+  subtotal: number
+) {
+  if (!promo || subtotal <= 0) return 0;
+
+  if (subtotal < Number(promo.minimum_order_amount || 0)) {
+    return 0;
+  }
+
+  const discount =
+    promo.discount_type === "percentage"
+      ? (subtotal * Number(promo.discount_value)) / 100
+      : Math.min(Number(promo.discount_value), subtotal);
+
+  return Math.round(discount * 100) / 100;
 }
 
 function ProductCard({
@@ -64,6 +107,9 @@ function ProductCard({
   isWishlisted: boolean;
   onToggleWishlist: () => void;
 }) {
+  const salePrice = discountedPrice(product);
+  const hasDiscount = product.discount_percent > 0;
+
   return (
     <article className="group relative overflow-hidden rounded-2xl border border-pink-100/80 bg-white shadow-[0_5px_15px_rgba(64,37,63,0.06)] transition-all duration-500 hover:-translate-y-2 hover:border-[#d9b7ca] hover:shadow-[0_22px_40px_rgba(64,37,63,0.16)]">
       <div className="relative overflow-hidden">
@@ -88,6 +134,12 @@ function ProductCard({
         >
           {product.stock ? "In Nigeria" : "China Preorder"}
         </span>
+
+        {hasDiscount && (
+          <span className="absolute bottom-3 left-3 rounded-full bg-red-600 px-3 py-2 text-[10px] font-bold text-white shadow-md">
+            {product.discount_percent}% OFF
+          </span>
+        )}
 
         {product.isNew && (
           <span className="absolute right-14 top-3 rounded-full bg-[#f9eef3] px-3 py-2 text-[10px] font-semibold text-[#40253f] shadow-md">
@@ -114,9 +166,17 @@ function ProductCard({
           {product.name}
         </h3>
 
-        <p className="mt-2 font-semibold text-[#40253f]">
-          {formatPrice(product.price)}
-        </p>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          {hasDiscount && (
+            <span className="text-xs text-gray-400 line-through">
+              {formatPrice(product.price)}
+            </span>
+          )}
+
+          <span className="font-semibold text-[#40253f]">
+            {formatPrice(salePrice)}
+          </span>
+        </div>
 
         <p className="mt-1 text-xs text-gray-500">{product.origin}</p>
 
@@ -165,15 +225,20 @@ export default function Home() {
   const [deliveryPreference, setDeliveryPreference] = useState("Pickup");
   const [customerNote, setCustomerNote] = useState("");
 
+  const [promoInput, setPromoInput] = useState("");
+  const [appliedPromo, setAppliedPromo] = useState<PromoCode | null>(null);
+  const [promoMessage, setPromoMessage] = useState("");
+  const [promoError, setPromoError] = useState("");
+  const [applyingPromo, setApplyingPromo] = useState(false);
+
   const [orderSubmitted, setOrderSubmitted] = useState(false);
   const [submittedOrderNumber, setSubmittedOrderNumber] = useState("");
   const [submittedWhatsAppUrl, setSubmittedWhatsAppUrl] = useState("");
 
-  // Rotate announcements and hide the announcement bar after a few seconds.
   useEffect(() => {
     const interval = setInterval(() => {
-      setAnnouncementIndex((previous) =>
-        (previous + 1) % announcements.length
+      setAnnouncementIndex(
+        (previous) => (previous + 1) % announcements.length
       );
     }, 4000);
 
@@ -187,8 +252,8 @@ export default function Home() {
     };
   }, []);
 
-  // Lock the homepage whenever the cart or wishlist is open.
-  // Each open panel retains its own independent scroll area.
+  // Keep the homepage locked while either panel is open.
+  // The cart and wishlist retain independent scroll areas.
   useEffect(() => {
     if (!showCart && !showWishlist) return;
 
@@ -218,12 +283,11 @@ export default function Home() {
       body.style.right = previousStyles.right;
       body.style.width = previousStyles.width;
       body.style.overflow = previousStyles.overflow;
-
       window.scrollTo(0, scrollY);
     };
   }, [showCart, showWishlist]);
 
-  // Load saved cart and wishlist
+  // Load saved cart and wishlist.
   useEffect(() => {
     try {
       const savedCart = localStorage.getItem("oraia_cart");
@@ -231,18 +295,12 @@ export default function Home() {
 
       if (savedCart) {
         const parsedCart = JSON.parse(savedCart);
-
-        if (Array.isArray(parsedCart)) {
-          setCart(parsedCart);
-        }
+        if (Array.isArray(parsedCart)) setCart(parsedCart);
       }
 
       if (savedWishlist) {
         const parsedWishlist = JSON.parse(savedWishlist);
-
-        if (Array.isArray(parsedWishlist)) {
-          setWishlist(parsedWishlist);
-        }
+        if (Array.isArray(parsedWishlist)) setWishlist(parsedWishlist);
       }
     } catch {
       setCart([]);
@@ -252,20 +310,17 @@ export default function Home() {
     setStorageLoaded(true);
   }, []);
 
-  // Save cart and wishlist
   useEffect(() => {
     if (!storageLoaded) return;
-
     localStorage.setItem("oraia_cart", JSON.stringify(cart));
   }, [cart, storageLoaded]);
 
   useEffect(() => {
     if (!storageLoaded) return;
-
     localStorage.setItem("oraia_wishlist", JSON.stringify(wishlist));
   }, [wishlist, storageLoaded]);
 
-  // Check logged-in customer
+  // Check logged-in customer.
   useEffect(() => {
     async function checkUser() {
       const {
@@ -301,14 +356,12 @@ export default function Home() {
 
     setAccountDropdown(false);
     setUser(null);
-
     router.push("/");
     router.refresh();
-
     setLoggingOut(false);
   }
 
-  // Load products from Supabase
+  // Load products from Supabase.
   async function loadProducts() {
     setLoading(true);
     setError("");
@@ -345,6 +398,10 @@ export default function Home() {
             name: product.name,
             category: product.category,
             price: Number(product.price),
+            discount_percent: Math.min(
+              100,
+              Math.max(0, Number(product.discount_percent) || 0)
+            ),
             origin: isInStock
               ? "In stock in Nigeria"
               : "Ships from China",
@@ -375,7 +432,7 @@ export default function Home() {
     loadProducts();
   }, []);
 
-  // Cart calculations
+  // Cart calculations.
   const cartProducts = cart
     .map((item) => {
       const product = products.find(
@@ -386,21 +443,137 @@ export default function Home() {
         ? { ...product, quantity: item.quantity }
         : null;
     })
-    .filter((item): item is Product & { quantity: number } => item !== null);
+    .filter(
+      (item): item is Product & { quantity: number } => item !== null
+    );
 
   const cartCount = cart.reduce(
     (total, item) => total + item.quantity,
     0
   );
 
-  const cartTotal = cartProducts.reduce(
+  const originalCartTotal = cartProducts.reduce(
     (total, item) => total + item.price * item.quantity,
     0
   );
 
+  // Product discounts are applied before promo codes.
+  const cartTotal = cartProducts.reduce(
+    (total, item) => total + discountedPrice(item) * item.quantity,
+    0
+  );
+
+  const productSavings = Math.round(
+    (originalCartTotal - cartTotal) * 100
+  ) / 100;
+
+  const promoEligible =
+    !!appliedPromo &&
+    cartTotal >= Number(appliedPromo.minimum_order_amount || 0);
+
+  const promoDiscount = promoEligible
+    ? calculatePromoDiscount(appliedPromo, cartTotal)
+    : 0;
+
+  const finalTotal = Math.max(0, cartTotal - promoDiscount);
+
   const wishlistProducts = products.filter((product) =>
     wishlist.includes(product.id)
   );
+
+  // Apply a promo code.
+  async function applyPromoCode() {
+    const code = promoInput.trim().toUpperCase();
+
+    setPromoError("");
+    setPromoMessage("");
+
+    if (!code) {
+      setPromoError("Please enter a promo code.");
+      return;
+    }
+
+    if (cartProducts.length === 0) {
+      setPromoError("Add products to your bag before applying a promo code.");
+      return;
+    }
+
+    setApplyingPromo(true);
+
+    try {
+      const { data, error } = await supabase
+        .from("promo_codes")
+        .select("*")
+        .ilike("code", code)
+        .eq("is_active", true)
+        .maybeSingle();
+
+      if (error) throw error;
+
+      if (!data) {
+        throw new Error("This promo code is invalid or inactive.");
+      }
+
+      const promo = data as PromoCode;
+      const now = new Date();
+
+      if (promo.starts_at && new Date(promo.starts_at) > now) {
+        throw new Error("This promo code is not available yet.");
+      }
+
+      if (promo.expires_at && new Date(promo.expires_at) <= now) {
+        throw new Error("This promo code has expired.");
+      }
+
+      if (
+        promo.usage_limit !== null &&
+        Number(promo.usage_count) >= Number(promo.usage_limit)
+      ) {
+        throw new Error("This promo code has reached its usage limit.");
+      }
+
+      if (
+        cartTotal < Number(promo.minimum_order_amount || 0)
+      ) {
+        throw new Error(
+          `Your product total must be at least ${formatPrice(
+            Number(promo.minimum_order_amount)
+          )} to use this code.`
+        );
+      }
+
+      if (
+        !["percentage", "fixed"].includes(promo.discount_type) ||
+        Number(promo.discount_value) <= 0
+      ) {
+        throw new Error("This promo code is not configured correctly.");
+      }
+
+      setAppliedPromo(promo);
+      setPromoInput(promo.code);
+      setPromoMessage(
+        promo.discount_type === "percentage"
+          ? `${promo.code} applied successfully. You saved ${promo.discount_value}% on your order.`
+          : `${promo.code} applied successfully.`
+      );
+    } catch (err) {
+      setAppliedPromo(null);
+      setPromoError(
+        err instanceof Error
+          ? err.message
+          : "Unable to apply this promo code."
+      );
+    } finally {
+      setApplyingPromo(false);
+    }
+  }
+
+  function removePromoCode() {
+    setAppliedPromo(null);
+    setPromoInput("");
+    setPromoMessage("");
+    setPromoError("");
+  }
 
   function addToBag(product: Product) {
     setCart((previous) => {
@@ -416,10 +589,7 @@ export default function Home() {
         );
       }
 
-      return [
-        ...previous,
-        { productId: product.id, quantity: 1 },
-      ];
+      return [...previous, { productId: product.id, quantity: 1 }];
     });
 
     setCheckoutError("");
@@ -456,14 +626,13 @@ export default function Home() {
 
   function moveWishlistItemToCart(productId: string) {
     const product = products.find((item) => item.id === productId);
-
     if (!product) return;
 
     addToBag(product);
     toggleWishlist(productId);
   }
 
-  // Submit order request to Supabase
+  // Submit order request to Supabase.
   async function handleCheckout() {
     setCheckoutError("");
 
@@ -491,7 +660,17 @@ export default function Home() {
       return;
     }
 
+    // Check that an applied code is still eligible before creating an order.
+    if (appliedPromo && !promoEligible) {
+      setCheckoutError(
+        "Your order no longer meets this promo code's minimum amount. Remove the code or add more products."
+      );
+      return;
+    }
+
     setCheckingOut(true);
+
+    let createdOrderId: string | null = null;
 
     try {
       const orderNumber = `ORA-${Date.now()}`;
@@ -504,7 +683,7 @@ export default function Home() {
           order_status: "PENDING",
           payment_status: "UNPAID",
           subtotal: cartTotal,
-          total_amount: cartTotal,
+          total_amount: finalTotal,
           currency: "NGN",
           shipping_status: "Not shipped",
           customer_name: customerName.trim(),
@@ -512,26 +691,60 @@ export default function Home() {
           customer_email: customerEmail.trim() || null,
           delivery_preference: deliveryPreference,
           customer_note: customerNote.trim() || null,
+          promo_code: appliedPromo?.code || null,
+          discount_amount: promoDiscount,
         })
         .select("id, order_number")
         .single();
 
       if (orderError) throw orderError;
 
-      const orderItems = cartProducts.map((product) => ({
-        order_id: order.id,
-        product_name: product.name,
-        product_image: product.image || null,
-        quantity: product.quantity,
-        unit_price: product.price,
-        total_price: product.price * product.quantity,
-      }));
+      createdOrderId = order.id;
+
+      const orderItems = cartProducts.map((product) => {
+        const unitPrice = discountedPrice(product);
+
+        return {
+          order_id: order.id,
+          product_name: product.name,
+          product_image: product.image || null,
+          quantity: product.quantity,
+          unit_price: unitPrice,
+          total_price: Math.round(
+            unitPrice * product.quantity * 100
+          ) / 100,
+        };
+      });
 
       const { error: itemsError } = await supabase
         .from("order_items")
         .insert(orderItems);
 
       if (itemsError) throw itemsError;
+
+      // Redeem the promo only after the order and its items are inserted.
+      // The database function checks validity and usage limits securely.
+      if (appliedPromo) {
+        const { data: redeemedDiscount, error: redeemError } =
+          await supabase.rpc("redeem_promo_code", {
+            p_code: appliedPromo.code,
+            p_subtotal: cartTotal,
+            p_expected_discount: promoDiscount,
+          });
+
+        if (redeemError) throw redeemError;
+
+        const confirmedDiscount = Number(redeemedDiscount);
+
+        if (
+          !Number.isFinite(confirmedDiscount) ||
+          Math.abs(confirmedDiscount - promoDiscount) > 0.01
+        ) {
+          throw new Error(
+            "The promo discount could not be confirmed. Please try applying the code again."
+          );
+        }
+      }
 
       const messageLines = [
         "Hello Oraia by Dara! I have submitted an order request.",
@@ -542,14 +755,26 @@ export default function Home() {
         `Delivery preference: ${deliveryPreference}`,
         "",
         "Order details:",
-        ...cartProducts.map(
-          (product, index) =>
-            `${index + 1}. ${product.name} x ${product.quantity} = ${formatPrice(
-              product.price * product.quantity
-            )} (${product.stock ? "In Nigeria" : "China Preorder"})`
-        ),
+        ...cartProducts.map((product, index) => {
+          const unitPrice = discountedPrice(product);
+
+          return `${index + 1}. ${product.name} x ${
+            product.quantity
+          } = ${formatPrice(
+            unitPrice * product.quantity
+          )} (${product.stock ? "In Nigeria" : "China Preorder"})`;
+        }),
         "",
-        `Product total: ${formatPrice(cartTotal)}`,
+        `Original product total: ${formatPrice(originalCartTotal)}`,
+        productSavings > 0
+          ? `Product discount savings: ${formatPrice(productSavings)}`
+          : "",
+        `Product subtotal after product discounts: ${formatPrice(cartTotal)}`,
+        appliedPromo ? `Promo code: ${appliedPromo.code}` : "",
+        promoDiscount > 0
+          ? `Promo discount: -${formatPrice(promoDiscount)}`
+          : "",
+        `Final product total: ${formatPrice(finalTotal)}`,
         customerNote.trim() ? `Note: ${customerNote.trim()}` : "",
         "",
         "Please confirm my order and let me know the next steps.",
@@ -568,12 +793,31 @@ export default function Home() {
       setCart([]);
       localStorage.removeItem("oraia_cart");
 
+      setAppliedPromo(null);
+      setPromoInput("");
+      setPromoMessage("");
+      setPromoError("");
+
       setCustomerName("");
       setCustomerPhone("");
       setCustomerEmail("");
       setDeliveryPreference("Pickup");
       setCustomerNote("");
     } catch (err) {
+      // If promo redemption fails, remove the order and its items so
+      // an unsuccessful promo checkout does not leave an incomplete order.
+      if (createdOrderId) {
+        await supabase
+          .from("order_items")
+          .delete()
+          .eq("order_id", createdOrderId);
+
+        await supabase
+          .from("customer_orders")
+          .delete()
+          .eq("id", createdOrderId);
+      }
+
       setCheckoutError(
         err instanceof Error
           ? err.message
@@ -665,8 +909,6 @@ export default function Home() {
       {/* HEADER */}
       <header className="sticky top-0 z-40 border-b border-pink-100 bg-white/95 shadow-[0_5px_18px_rgba(64,37,63,0.07)] backdrop-blur-md">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6 sm:py-4">
-
-          {/* LOGO */}
           <a
             href="#home"
             onClick={closeMenu}
@@ -690,30 +932,26 @@ export default function Home() {
 
           {/* HEADER ACTIONS */}
           <div className="flex items-center gap-2 sm:gap-3">
-
-            {/* ACCOUNT */}
             {!authChecked ? (
               <span className="hidden text-xs text-gray-400 sm:block">
                 Loading...
               </span>
             ) : !user ? (
-              <a
-                href="/login"
-                aria-label="Log in"
-                title="Log in"
-                className="flex h-10 w-10 items-center justify-center rounded-full border border-pink-100 bg-white text-lg text-[#40253f] shadow-[0_3px_9px_rgba(64,37,63,0.08)] transition-all hover:-translate-y-0.5 hover:bg-[#f9eef3] hover:shadow-md"
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                  className="h-5 w-5"
+              <div className="flex items-center gap-2">
+                <a
+                  href="/login"
+                  className="rounded-full border border-[#40253f] px-3 py-2 text-[10px] font-semibold text-[#40253f] transition hover:bg-[#f9eef3] sm:px-5 sm:py-2.5 sm:text-xs"
                 >
-                  <circle cx="12" cy="8" r="3.5" />
-                  <path d="M5 20c.7-3.5 3.2-5.5 7-5.5s6.3 2 7 5.5" />
-                </svg>
-              </a>
+                  Log In
+                </a>
+
+                <a
+                  href="/signup"
+                  className="rounded-full bg-[#40253f] px-3 py-2 text-[10px] font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md sm:px-5 sm:py-2.5 sm:text-xs"
+                >
+                  Sign Up
+                </a>
+              </div>
             ) : (
               <div className="relative">
                 <button
@@ -835,7 +1073,6 @@ export default function Home() {
           <div className="absolute left-0 right-0 top-full z-50 border-t border-pink-100 bg-white shadow-[0_20px_35px_rgba(64,37,63,0.16)]">
             <div className="mx-auto max-w-7xl px-5 py-6 sm:px-8">
               <div className="grid gap-8 md:grid-cols-3">
-
                 <div>
                   <p className="mb-4 text-[10px] font-semibold uppercase tracking-[0.2em] text-[#b47c9c]">
                     Explore Oraia
@@ -859,14 +1096,12 @@ export default function Home() {
                       </a>
                     ))}
 
-                    {/* WISHLIST INSIDE MENU */}
                     <button
                       type="button"
                       onClick={openWishlistFromMenu}
                       className="flex w-full items-center justify-between rounded-lg px-3 py-3 text-left text-sm text-[#40253f] transition hover:bg-[#fcf7fa]"
                     >
                       <span>Wishlist</span>
-
                       <span className="flex items-center gap-2 text-xs text-[#b47c9c]">
                         {wishlist.length > 0 && (
                           <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-[#f9eef3] px-1.5 font-semibold">
@@ -941,7 +1176,7 @@ export default function Home() {
                         onClick={closeMenu}
                         className="rounded-full bg-[#40253f] px-5 py-3 text-xs font-medium text-white shadow-md transition hover:-translate-y-0.5 hover:shadow-lg"
                       >
-                        Create Account
+                        Sign Up
                       </a>
                     </div>
                   )}
@@ -993,7 +1228,7 @@ export default function Home() {
               </button>
             </div>
 
-            {/* Shopping bag has its own independent scroll area */}
+            {/* Independent shopping bag scroll area */}
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-6">
               {cartProducts.length === 0 && !orderSubmitted ? (
                 <div className="py-16 text-center">
@@ -1013,73 +1248,95 @@ export default function Home() {
                 </div>
               ) : (
                 <div className="space-y-5">
-                  {cartProducts.map((product) => (
-                    <div
-                      key={product.id}
-                      className="flex gap-4 border-b border-pink-100 pb-5"
-                    >
-                      {product.image ? (
-                        <img
-                          src={product.image}
-                          alt={product.name}
-                          className="h-24 w-24 rounded-xl object-cover shadow-md"
-                        />
-                      ) : (
-                        <div className="flex h-24 w-24 items-center justify-center rounded-xl bg-[#fcf7fa] text-xs text-gray-400">
-                          No image
-                        </div>
-                      )}
+                  {cartProducts.map((product) => {
+                    const salePrice = discountedPrice(product);
+                    const hasDiscount = product.discount_percent > 0;
 
-                      <div className="min-w-0 flex-1">
-                        <h3 className="font-semibold text-[#40253f]">
-                          {product.name}
-                        </h3>
-                        <p className="mt-1 text-sm text-gray-500">
-                          {formatPrice(product.price)}
-                        </p>
-                        <p className="mt-1 text-xs text-[#b47c9c]">
-                          {product.stock ? "In Nigeria" : "China Preorder"}
-                        </p>
+                    return (
+                      <div
+                        key={product.id}
+                        className="flex gap-4 border-b border-pink-100 pb-5"
+                      >
+                        {product.image ? (
+                          <img
+                            src={product.image}
+                            alt={product.name}
+                            className="h-24 w-24 rounded-xl object-cover shadow-md"
+                          />
+                        ) : (
+                          <div className="flex h-24 w-24 items-center justify-center rounded-xl bg-[#fcf7fa] text-xs text-gray-400">
+                            No image
+                          </div>
+                        )}
 
-                        <div className="mt-3 flex items-center justify-between gap-3">
-                          <div className="flex items-center gap-3">
-                            <button
-                              onClick={() =>
-                                changeQuantity(product.id, -1)
-                              }
-                              className="flex h-8 w-8 items-center justify-center rounded-full border border-pink-200"
-                            >
-                              −
-                            </button>
+                        <div className="min-w-0 flex-1">
+                          <h3 className="font-semibold text-[#40253f]">
+                            {product.name}
+                          </h3>
 
-                            <span className="text-sm font-medium">
-                              {product.quantity}
+                          <div className="mt-1 flex flex-wrap items-center gap-2 text-sm">
+                            {hasDiscount && (
+                              <span className="text-xs text-gray-400 line-through">
+                                {formatPrice(product.price)}
+                              </span>
+                            )}
+                            <span className="font-medium text-[#40253f]">
+                              {formatPrice(salePrice)}
                             </span>
+                          </div>
+
+                          {hasDiscount && (
+                            <p className="mt-1 text-xs font-medium text-green-700">
+                              You save {formatPrice(
+                                (product.price - salePrice) * product.quantity
+                              )}
+                            </p>
+                          )}
+
+                          <p className="mt-1 text-xs text-[#b47c9c]">
+                            {product.stock ? "In Nigeria" : "China Preorder"}
+                          </p>
+
+                          <div className="mt-3 flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-3">
+                              <button
+                                onClick={() =>
+                                  changeQuantity(product.id, -1)
+                                }
+                                className="flex h-8 w-8 items-center justify-center rounded-full border border-pink-200"
+                              >
+                                −
+                              </button>
+
+                              <span className="text-sm font-medium">
+                                {product.quantity}
+                              </span>
+
+                              <button
+                                onClick={() =>
+                                  changeQuantity(product.id, 1)
+                                }
+                                className="flex h-8 w-8 items-center justify-center rounded-full border border-pink-200"
+                              >
+                                +
+                              </button>
+                            </div>
 
                             <button
-                              onClick={() =>
-                                changeQuantity(product.id, 1)
-                              }
-                              className="flex h-8 w-8 items-center justify-center rounded-full border border-pink-200"
+                              onClick={() => removeFromCart(product.id)}
+                              className="text-xs text-red-500"
                             >
-                              +
+                              Remove
                             </button>
                           </div>
 
-                          <button
-                            onClick={() => removeFromCart(product.id)}
-                            className="text-xs text-red-500"
-                          >
-                            Remove
-                          </button>
+                          <p className="mt-3 text-sm font-semibold text-[#40253f]">
+                            {formatPrice(salePrice * product.quantity)}
+                          </p>
                         </div>
-
-                        <p className="mt-3 text-sm font-semibold text-[#40253f]">
-                          {formatPrice(product.price * product.quantity)}
-                        </p>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -1137,11 +1394,134 @@ export default function Home() {
                 </div>
               </div>
             ) : cartProducts.length > 0 ? (
-              <div className="max-h-[55%] shrink-0 overflow-y-auto overscroll-contain border-t border-pink-100 p-6">
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Product total</span>
+              <div className="max-h-[60%] shrink-0 overflow-y-auto overscroll-contain border-t border-pink-100 p-6">
+                {/* ORDER TOTALS */}
+                <div className="space-y-3">
+                  {productSavings > 0 && (
+                    <>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-500">
+                          Original product total
+                        </span>
+                        <span className="text-gray-400 line-through">
+                          {formatPrice(originalCartTotal)}
+                        </span>
+                      </div>
+
+                      <div className="flex justify-between text-sm">
+                        <span className="text-green-700">
+                          Product discount savings
+                        </span>
+                        <span className="font-medium text-green-700">
+                          -{formatPrice(productSavings)}
+                        </span>
+                      </div>
+                    </>
+                  )}
+
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-500">
+                      Product subtotal
+                    </span>
+                    <span className="font-semibold text-[#40253f]">
+                      {formatPrice(cartTotal)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* PROMO CODE */}
+                <div className="mt-5 rounded-xl border border-pink-100 bg-[#fcf7fa] p-4">
+                  <label className="mb-2 block text-sm font-semibold text-[#40253f]">
+                    Have a promo code?
+                  </label>
+
+                  {appliedPromo ? (
+                    <div>
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-green-700">
+                            {appliedPromo.code}
+                          </p>
+                          <p className="mt-1 text-xs text-gray-500">
+                            Promo code applied
+                          </p>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={removePromoCode}
+                          className="rounded-full border border-red-200 px-3 py-2 text-xs font-medium text-red-600"
+                        >
+                          Remove
+                        </button>
+                      </div>
+
+                      {!promoEligible && (
+                        <p className="mt-3 text-xs text-red-600">
+                          Your subtotal is below this code's minimum order
+                          amount of{" "}
+                          {formatPrice(
+                            Number(appliedPromo.minimum_order_amount)
+                          )}
+                          . Add more products or remove the code.
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={promoInput}
+                        onChange={(event) => {
+                          setPromoInput(event.target.value.toUpperCase());
+                          setPromoError("");
+                          setPromoMessage("");
+                        }}
+                        placeholder="Enter promo code"
+                        className="min-w-0 flex-1 rounded-full border border-pink-200 bg-white px-4 py-3 text-sm uppercase text-[#302033] outline-none focus:border-[#40253f]"
+                      />
+
+                      <button
+                        type="button"
+                        onClick={applyPromoCode}
+                        disabled={applyingPromo}
+                        className="rounded-full bg-[#40253f] px-5 py-3 text-xs font-semibold text-white disabled:opacity-50"
+                      >
+                        {applyingPromo ? "Checking..." : "Apply"}
+                      </button>
+                    </div>
+                  )}
+
+                  {promoMessage && (
+                    <p className="mt-3 text-xs text-green-700">
+                      {promoMessage}
+                    </p>
+                  )}
+
+                  {promoError && (
+                    <p className="mt-3 text-xs text-red-600">
+                      {promoError}
+                    </p>
+                  )}
+                </div>
+
+                {promoDiscount > 0 && (
+                  <div className="mt-4 flex justify-between text-sm">
+                    <span className="text-green-700">
+                      Promo discount ({appliedPromo?.code})
+                    </span>
+                    <span className="font-semibold text-green-700">
+                      -{formatPrice(promoDiscount)}
+                    </span>
+                  </div>
+                )}
+
+                <div className="mt-4 flex justify-between border-t border-pink-100 pt-4">
                   <span className="font-semibold text-[#40253f]">
-                    {formatPrice(cartTotal)}
+                    Final product total
+                  </span>
+                  <span className="text-lg font-bold text-[#40253f]">
+                    {formatPrice(finalTotal)}
                   </span>
                 </div>
 
@@ -1149,6 +1529,7 @@ export default function Home() {
                   Shipping charges, where applicable, will be confirmed separately.
                 </p>
 
+                {/* CHECKOUT FORM */}
                 <div className="mt-5 space-y-4">
                   <div>
                     <label className="mb-2 block text-sm font-medium text-[#40253f]">
@@ -1291,7 +1672,7 @@ export default function Home() {
               </button>
             </div>
 
-            {/* Wishlist has its own independent scroll area */}
+            {/* Independent wishlist scroll area */}
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-6">
               {wishlistProducts.length === 0 ? (
                 <div className="py-16 text-center">
@@ -1311,52 +1692,70 @@ export default function Home() {
                 </div>
               ) : (
                 <div className="space-y-5">
-                  {wishlistProducts.map((product) => (
-                    <div
-                      key={product.id}
-                      className="flex gap-4 border-b border-pink-100 pb-5"
-                    >
-                      {product.image ? (
-                        <img
-                          src={product.image}
-                          alt={product.name}
-                          className="h-24 w-24 rounded-xl object-cover shadow-md"
-                        />
-                      ) : (
-                        <div className="flex h-24 w-24 items-center justify-center rounded-xl bg-[#fcf7fa] text-xs text-gray-400">
-                          No image
-                        </div>
-                      )}
+                  {wishlistProducts.map((product) => {
+                    const salePrice = discountedPrice(product);
+                    const hasDiscount = product.discount_percent > 0;
 
-                      <div className="min-w-0 flex-1">
-                        <h3 className="font-semibold text-[#40253f]">
-                          {product.name}
-                        </h3>
+                    return (
+                      <div
+                        key={product.id}
+                        className="flex gap-4 border-b border-pink-100 pb-5"
+                      >
+                        {product.image ? (
+                          <img
+                            src={product.image}
+                            alt={product.name}
+                            className="h-24 w-24 rounded-xl object-cover shadow-md"
+                          />
+                        ) : (
+                          <div className="flex h-24 w-24 items-center justify-center rounded-xl bg-[#fcf7fa] text-xs text-gray-400">
+                            No image
+                          </div>
+                        )}
 
-                        <p className="mt-2 text-sm font-semibold text-[#40253f]">
-                          {formatPrice(product.price)}
-                        </p>
+                        <div className="min-w-0 flex-1">
+                          <h3 className="font-semibold text-[#40253f]">
+                            {product.name}
+                          </h3>
 
-                        <div className="mt-4 flex flex-wrap gap-2">
-                          <button
-                            onClick={() =>
-                              moveWishlistItemToCart(product.id)
-                            }
-                            className="rounded-full bg-[#40253f] px-4 py-2 text-xs text-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
-                          >
-                            Move to Bag
-                          </button>
+                          <div className="mt-2 flex flex-wrap items-center gap-2">
+                            {hasDiscount && (
+                              <span className="text-xs text-gray-400 line-through">
+                                {formatPrice(product.price)}
+                              </span>
+                            )}
+                            <span className="text-sm font-semibold text-[#40253f]">
+                              {formatPrice(salePrice)}
+                            </span>
+                          </div>
 
-                          <button
-                            onClick={() => toggleWishlist(product.id)}
-                            className="rounded-full border border-pink-200 px-4 py-2 text-xs text-red-500"
-                          >
-                            Remove
-                          </button>
+                          {hasDiscount && (
+                            <p className="mt-1 text-xs font-medium text-green-700">
+                              {product.discount_percent}% off
+                            </p>
+                          )}
+
+                          <div className="mt-4 flex flex-wrap gap-2">
+                            <button
+                              onClick={() =>
+                                moveWishlistItemToCart(product.id)
+                              }
+                              className="rounded-full bg-[#40253f] px-4 py-2 text-xs text-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+                            >
+                              Move to Bag
+                            </button>
+
+                            <button
+                              onClick={() => toggleWishlist(product.id)}
+                              className="rounded-full border border-pink-200 px-4 py-2 text-xs text-red-500"
+                            >
+                              Remove
+                            </button>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -1364,7 +1763,7 @@ export default function Home() {
         </div>
       )}
 
-      {/* REDESIGNED 3D HERO */}
+      {/* 3D HERO */}
       <section
         id="home"
         className="relative isolate overflow-hidden bg-gradient-to-br from-[#fffafd] via-[#f9eef3] to-[#efdce7] px-5 py-16 md:py-24"
@@ -1500,7 +1899,10 @@ export default function Home() {
       </section>
 
       {/* IN STOCK */}
-      <section id="in-stock" className="bg-gradient-to-br from-[#fcf7fa] to-[#f4e8ef] px-5 py-16">
+      <section
+        id="in-stock"
+        className="bg-gradient-to-br from-[#fcf7fa] to-[#f4e8ef] px-5 py-16"
+      >
         <div className="mx-auto max-w-7xl">
           <div className="mb-8">
             <p className="text-xs uppercase tracking-widest text-[#b47c9c]">
@@ -1563,7 +1965,7 @@ export default function Home() {
       </section>
 
       {/* CATEGORIES */}
-      <section className="bg-gradient-to-br from-[#f9eef3] to-[#f0dfE9] px-5 py-16">
+      <section className="bg-gradient-to-br from-[#f9eef3] to-[#f0dfe9] px-5 py-16">
         <div className="mx-auto max-w-7xl">
           <p className="text-xs uppercase tracking-widest text-[#ad7191]">
             Find Your Favourites
@@ -1651,7 +2053,10 @@ export default function Home() {
       </section>
 
       {/* PERSONAL SHOPPING AND PROCUREMENT */}
-      <section id="services" className="bg-gradient-to-br from-[#f9eef3] to-[#f1e1eb] px-5 py-16">
+      <section
+        id="services"
+        className="bg-gradient-to-br from-[#f9eef3] to-[#f1e1eb] px-5 py-16"
+      >
         <div className="mx-auto max-w-7xl">
           <p className="text-xs uppercase tracking-widest text-[#ad7191]">
             More Than Just Shopping
@@ -1828,7 +2233,10 @@ export default function Home() {
       </section>
 
       {/* HOW IT WORKS */}
-      <section id="how-it-works" className="bg-gradient-to-br from-[#fcf7fa] to-[#f3e6ee] px-5 py-16">
+      <section
+        id="how-it-works"
+        className="bg-gradient-to-br from-[#fcf7fa] to-[#f3e6ee] px-5 py-16"
+      >
         <div className="mx-auto max-w-7xl">
           <div className="text-center">
             <p className="text-xs uppercase tracking-widest text-[#ad7191]">
@@ -1900,7 +2308,9 @@ export default function Home() {
             </p>
 
             <h2 className="mt-3 text-3xl font-semibold">
-              {user ? "Welcome Back to Oraia" : "Welcome to Your Oraia Account"}
+              {user
+                ? "Welcome Back to Oraia"
+                : "Welcome to Your Oraia Account"}
             </h2>
 
             <p className="mt-4 max-w-2xl text-sm leading-7 text-pink-100">
@@ -1923,7 +2333,7 @@ export default function Home() {
                     href="/signup"
                     className="rounded-full bg-white px-7 py-3 text-sm font-semibold text-[#40253f] shadow-md transition hover:-translate-y-1 hover:bg-pink-100 hover:shadow-lg"
                   >
-                    Create Account
+                    Sign Up
                   </a>
 
                   <a
