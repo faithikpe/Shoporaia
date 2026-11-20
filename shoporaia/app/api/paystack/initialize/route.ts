@@ -1,6 +1,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import crypto from "crypto";
 
 export async function POST(request: NextRequest) {
   try {
@@ -14,18 +15,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-    const paystackSecret = process.env.PAYSTACK_SECRET_KEY!;
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const paystackSecret = process.env.PAYSTACK_SECRET_KEY;
 
-    if (!serviceKey || !paystackSecret) {
+    if (!supabaseUrl || !anonKey || !serviceKey || !paystackSecret) {
       throw new Error("Payment configuration is missing.");
     }
 
     const authClient = createClient(supabaseUrl, anonKey);
-    const { data: userData, error: authError } =
-      await authClient.auth.getUser(token);
+
+    const {
+      data: userData,
+      error: authError,
+    } = await authClient.auth.getUser(token);
 
     if (authError || !userData.user) {
       return NextResponse.json(
@@ -34,11 +38,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const adminClient = createClient(supabaseUrl, serviceKey);
+    const adminClient = createClient(supabaseUrl, serviceKey, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    });
 
-    const { orderId } = await request.json();
+    const body = await request.json();
+    const orderId = body.orderId;
 
-    if (!orderId) {
+    if (!orderId || typeof orderId !== "string") {
       return NextResponse.json(
         { error: "Order ID is required." },
         { status: 400 }
@@ -48,7 +58,7 @@ export async function POST(request: NextRequest) {
     const { data: order, error: orderError } = await adminClient
       .from("customer_orders")
       .select(
-        "id, user_id, total_amount, currency, payment_status, customer_email, payment_reference"
+        "id, order_number, user_id, total_amount, currency, payment_status, order_status, customer_email"
       )
       .eq("id", orderId)
       .eq("user_id", userData.user.id)
@@ -61,23 +71,42 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (order.payment_status === "PAID") {
+    const paymentStatus = String(order.payment_status || "UNPAID")
+      .trim()
+      .toUpperCase();
+
+    const orderStatus = String(order.order_status || "")
+      .trim()
+      .toUpperCase();
+
+    if (paymentStatus === "PAID" || paymentStatus === "SUCCESS") {
       return NextResponse.json(
         { error: "This order has already been paid." },
         { status: 400 }
       );
     }
 
-    if (order.payment_reference) {
+    if (!["UNPAID", "PENDING", "FAILED"].includes(paymentStatus)) {
       return NextResponse.json(
-        { error: "This order already has a payment reference. Please contact support." },
+        { error: "This order cannot be paid at the moment." },
+        { status: 400 }
+      );
+    }
+
+    if (orderStatus === "CANCELLED") {
+      return NextResponse.json(
+        { error: "This order has been cancelled." },
         { status: 400 }
       );
     }
 
     const amount = Math.round(Number(order.total_amount) * 100);
 
-    if (!Number.isFinite(amount) || amount <= 0 || order.currency !== "NGN") {
+    if (
+      !Number.isFinite(amount) ||
+      amount <= 0 ||
+      String(order.currency).toUpperCase() !== "NGN"
+    ) {
       return NextResponse.json(
         { error: "Invalid order amount or currency." },
         { status: 400 }
@@ -95,6 +124,11 @@ export async function POST(request: NextRequest) {
 
     const reference = `ORAIA-${crypto.randomUUID()}`;
 
+    const siteUrl =
+      process.env.NEXT_PUBLIC_SITE_URL || request.nextUrl.origin;
+
+    const callbackUrl = `${siteUrl.replace(/\/$/, "")}/payment/callback`;
+
     const paystackResponse = await fetch(
       "https://api.paystack.co/transaction/initialize",
       {
@@ -108,9 +142,10 @@ export async function POST(request: NextRequest) {
           amount,
           currency: "NGN",
           reference,
-          callback_url: "https://shoporaia.ng/payment/callback",
+          callback_url: callbackUrl,
           metadata: {
             order_id: order.id,
+            order_number: order.order_number,
             customer_id: userData.user.id,
           },
         }),
@@ -125,21 +160,40 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { error: updateError } = await adminClient
+    let updateQuery = adminClient
       .from("customer_orders")
-      .update({ payment_reference: reference })
+      .update({
+        payment_reference: reference,
+      })
       .eq("id", order.id)
-      .eq("payment_status", "UNPAID");
+      .eq("user_id", userData.user.id);
 
-    if (updateError) {
-      throw new Error("Unable to save payment reference.");
+    if (order.payment_status == null) {
+      updateQuery = updateQuery.is("payment_status", null);
+    } else {
+      updateQuery = updateQuery.eq(
+        "payment_status",
+        order.payment_status
+      );
+    }
+
+    const { data: updatedOrder, error: updateError } =
+      await updateQuery.select("id").maybeSingle();
+
+    if (updateError || !updatedOrder) {
+      throw new Error(
+        "Unable to save payment reference. Please refresh and try again."
+      );
     }
 
     return NextResponse.json({
+      success: true,
       authorization_url: paymentData.data.authorization_url,
       reference,
     });
   } catch (error) {
+    console.error("Paystack initialization error:", error);
+
     return NextResponse.json(
       {
         error:
