@@ -54,6 +54,9 @@ type CustomerOrder = {
   tracking_number: string | null;
   shipping_carrier: string | null;
   shipping_notes: string | null;
+  shipping_tracking_url: string | null;
+  shipping_dispatch_date: string | null;
+  shipping_estimated_delivery: string | null;
   shipping_fee: number;
   shipping_payment_status: string | null;
   shipping_payment_reference: string | null;
@@ -209,6 +212,9 @@ export default function AccountPage() {
   const [userId, setUserId] = useState("");
   const [view, setView] = useState<AccountView>("dashboard");
 
+  const [accountType, setAccountType] = useState("customer");
+  const [upgradingAccount, setUpgradingAccount] = useState(false);
+
   const [profile, setProfile] = useState<CustomerProfile>({
     full_name: "",
     username: "",
@@ -273,7 +279,7 @@ export default function AccountPage() {
     const { data: profileData, error: profileError } = await supabase
       .from("customer_profiles")
       .select(
-        "full_name, username, email, phone, country, state, city, delivery_address"
+        "full_name, username, email, phone, country, state, city, delivery_address, account_type"
       )
       .eq("user_id", user.id)
       .maybeSingle();
@@ -281,6 +287,8 @@ export default function AccountPage() {
     if (profileError) {
       setError("Unable to load your profile. Please refresh the page.");
     }
+
+    setAccountType(profileData?.account_type || "customer");
 
     const loadedProfile: CustomerProfile = {
       full_name: profileData?.full_name || "",
@@ -458,6 +466,47 @@ export default function AccountPage() {
     }
 
     setSaving(false);
+  }
+
+  async function becomeDropshipper() {
+    if (!userId || upgradingAccount) return;
+
+    setUpgradingAccount(true);
+    setError("");
+    setMessage("");
+
+    try {
+      const { data, error: updateError } = await supabase
+        .from("customer_profiles")
+        .update({
+          account_type: "dropshipper",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("user_id", userId)
+        .select("account_type")
+        .maybeSingle();
+
+      if (updateError) {
+        throw new Error(updateError.message);
+      }
+
+      if (!data) {
+        throw new Error(
+          "Your account could not be updated. Please refresh the page and try again."
+        );
+      }
+
+      setAccountType(data.account_type || "dropshipper");
+      setMessage("Your dropshipper account is now active!");
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? `Unable to activate dropshipper account: ${err.message}`
+          : "Unable to activate your dropshipper account."
+      );
+    } finally {
+      setUpgradingAccount(false);
+    }
   }
 
   function openNewAddress() {
@@ -956,6 +1005,44 @@ export default function AccountPage() {
             {/* DASHBOARD */}
             {view === "dashboard" && (
               <div className="space-y-6">
+                {/* DROPSHIPPER ACCOUNT */}
+                <div className="rounded-2xl border border-[#eadce6] bg-white p-6 shadow-sm">
+                  <h2 className="text-lg font-bold text-[#43243b]">
+                    Dropshipper Account
+                  </h2>
+
+                  {accountType === "dropshipper" ? (
+                    <div className="mt-3">
+                      <span className="rounded-full bg-green-100 px-3 py-2 text-xs font-semibold text-green-800">
+                        Dropshipper Active
+                      </span>
+
+                      <p className="mt-3 text-sm leading-6 text-[#756574]">
+                        Your account has dropshipper access. Wholesale
+                        pricing and minimum order quantities will be
+                        available on eligible products.
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="mt-2 text-sm leading-6 text-[#756574]">
+                        Become an Oraia dropshipper and access wholesale
+                        prices on eligible products.
+                      </p>
+
+                      <button
+                        onClick={becomeDropshipper}
+                        disabled={upgradingAccount}
+                        className="mt-4 rounded-xl bg-[#75436d] px-6 py-3 text-sm font-semibold text-white hover:bg-[#603657] disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {upgradingAccount
+                          ? "Activating..."
+                          : "Become a Dropshipper"}
+                      </button>
+                    </>
+                  )}
+                </div>
+
                 <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                   {[
                     {
@@ -1564,10 +1651,14 @@ export default function AccountPage() {
                         )}
                       </div>
 
+                      {/* DELIVERY INFORMATION AND TRACKING */}
                       {(order.shipping_status ||
                         order.tracking_number ||
                         order.shipping_carrier ||
-                        order.shipping_notes) && (
+                        order.shipping_notes ||
+                        order.shipping_tracking_url ||
+                        order.shipping_dispatch_date ||
+                        order.shipping_estimated_delivery) && (
                         <div className="mt-4 rounded-xl bg-[#fff8fc] p-4">
                           <h4 className="mb-2 text-sm font-bold text-[#43243b]">
                             Delivery Information
@@ -1591,10 +1682,35 @@ export default function AccountPage() {
                             </p>
                           )}
 
-                          {order.shipping_notes && (
+                          {order.shipping_dispatch_date && (
                             <p className="mt-1 text-sm text-[#756574]">
+                              Dispatch Date:{" "}
+                              {formatDate(order.shipping_dispatch_date)}
+                            </p>
+                          )}
+
+                          {order.shipping_estimated_delivery && (
+                            <p className="mt-1 text-sm text-[#756574]">
+                              Estimated Delivery:{" "}
+                              {formatDate(order.shipping_estimated_delivery)}
+                            </p>
+                          )}
+
+                          {order.shipping_notes && (
+                            <p className="mt-2 text-sm leading-6 text-[#756574]">
                               {order.shipping_notes}
                             </p>
+                          )}
+
+                          {order.shipping_tracking_url && (
+                            <a
+                              href={order.shipping_tracking_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="mt-3 inline-block text-sm font-semibold text-[#75436d] underline"
+                            >
+                              Track Your Shipment →
+                            </a>
                           )}
                         </div>
                       )}
