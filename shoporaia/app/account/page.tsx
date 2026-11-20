@@ -468,6 +468,7 @@ export default function AccountPage() {
     setSaving(false);
   }
 
+  // UPDATED DROPSHIPPER ACTIVATION
   async function becomeDropshipper() {
     if (!userId || upgradingAccount) return;
 
@@ -476,27 +477,21 @@ export default function AccountPage() {
     setMessage("");
 
     try {
-      const { data, error: updateError } = await supabase
-        .from("customer_profiles")
-        .update({
-          account_type: "dropshipper",
-          updated_at: new Date().toISOString(),
-        })
-        .eq("user_id", userId)
-        .select("account_type")
-        .maybeSingle();
+      const { data, error: rpcError } = await supabase.rpc(
+        "activate_dropshipper"
+      );
 
-      if (updateError) {
-        throw new Error(updateError.message);
+      if (rpcError) {
+        throw new Error(rpcError.message);
       }
 
-      if (!data) {
+      if (data !== true) {
         throw new Error(
-          "Your account could not be updated. Please refresh the page and try again."
+          "No customer profile was updated. Please contact support."
         );
       }
 
-      setAccountType(data.account_type || "dropshipper");
+      setAccountType("dropshipper");
       setMessage("Your dropshipper account is now active!");
     } catch (err) {
       setError(
