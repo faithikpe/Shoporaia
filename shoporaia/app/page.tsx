@@ -632,7 +632,7 @@ export default function Home() {
     toggleWishlist(productId);
   }
 
-  // Submit order request to Supabase.
+  // Create the order and send the customer to secure Paystack checkout.
   async function handleCheckout() {
     setCheckoutError("");
 
@@ -660,7 +660,6 @@ export default function Home() {
       return;
     }
 
-    // Check that an applied code is still eligible before creating an order.
     if (appliedPromo && !promoEligible) {
       setCheckoutError(
         "Your order no longer meets this promo code's minimum amount. Remove the code or add more products."
@@ -669,7 +668,6 @@ export default function Home() {
     }
 
     setCheckingOut(true);
-
     let createdOrderId: string | null = null;
 
     try {
@@ -688,7 +686,7 @@ export default function Home() {
           shipping_status: "Not shipped",
           customer_name: customerName.trim(),
           customer_phone: customerPhone.trim(),
-          customer_email: customerEmail.trim() || null,
+          customer_email: customerEmail.trim() || user.email || null,
           delivery_preference: deliveryPreference,
           customer_note: customerNote.trim() || null,
           promo_code: appliedPromo?.code || null,
@@ -698,21 +696,17 @@ export default function Home() {
         .single();
 
       if (orderError) throw orderError;
-
       createdOrderId = order.id;
 
       const orderItems = cartProducts.map((product) => {
         const unitPrice = discountedPrice(product);
-
         return {
           order_id: order.id,
           product_name: product.name,
           product_image: product.image || null,
           quantity: product.quantity,
           unit_price: unitPrice,
-          total_price: Math.round(
-            unitPrice * product.quantity * 100
-          ) / 100,
+          total_price: Math.round(unitPrice * product.quantity * 100) / 100,
         };
       });
 
@@ -722,90 +716,37 @@ export default function Home() {
 
       if (itemsError) throw itemsError;
 
-      // Redeem the promo only after the order and its items are inserted.
-      // The database function checks validity and usage limits securely.
-      if (appliedPromo) {
-        const { data: redeemedDiscount, error: redeemError } =
-          await supabase.rpc("redeem_promo_code", {
-            p_code: appliedPromo.code,
-            p_subtotal: cartTotal,
-            p_expected_discount: promoDiscount,
-          });
+      // Promo usage is not redeemed here. It must only be counted after
+      // Paystack has confirmed that the order has been paid.
+      const { data: sessionData, error: sessionError } =
+        await supabase.auth.getSession();
 
-        if (redeemError) throw redeemError;
+      if (sessionError) throw sessionError;
+      const accessToken = sessionData.session?.access_token;
 
-        const confirmedDiscount = Number(redeemedDiscount);
-
-        if (
-          !Number.isFinite(confirmedDiscount) ||
-          Math.abs(confirmedDiscount - promoDiscount) > 0.01
-        ) {
-          throw new Error(
-            "The promo discount could not be confirmed. Please try applying the code again."
-          );
-        }
+      if (!accessToken) {
+        throw new Error("Your login session has expired. Please log in again.");
       }
 
-      const messageLines = [
-        "Hello Oraia by Dara! I have submitted an order request.",
-        "",
-        `Order number: ${order.order_number}`,
-        `Name: ${customerName.trim()}`,
-        `Phone: ${customerPhone.trim()}`,
-        `Delivery preference: ${deliveryPreference}`,
-        "",
-        "Order details:",
-        ...cartProducts.map((product, index) => {
-          const unitPrice = discountedPrice(product);
+      const paymentResponse = await fetch("/api/paystack/initialize", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ orderId: order.id }),
+      });
 
-          return `${index + 1}. ${product.name} x ${
-            product.quantity
-          } = ${formatPrice(
-            unitPrice * product.quantity
-          )} (${product.stock ? "In Nigeria" : "China Preorder"})`;
-        }),
-        "",
-        `Original product total: ${formatPrice(originalCartTotal)}`,
-        productSavings > 0
-          ? `Product discount savings: ${formatPrice(productSavings)}`
-          : "",
-        `Product subtotal after product discounts: ${formatPrice(cartTotal)}`,
-        appliedPromo ? `Promo code: ${appliedPromo.code}` : "",
-        promoDiscount > 0
-          ? `Promo discount: -${formatPrice(promoDiscount)}`
-          : "",
-        `Final product total: ${formatPrice(finalTotal)}`,
-        customerNote.trim() ? `Note: ${customerNote.trim()}` : "",
-        "",
-        "Please confirm my order and let me know the next steps.",
-      ].filter(Boolean);
+      const paymentData = await paymentResponse.json();
 
-      const whatsappMessage = encodeURIComponent(
-        messageLines.join("\n")
-      );
+      if (!paymentResponse.ok || !paymentData.authorization_url) {
+        throw new Error(
+          paymentData.error || "Unable to start payment. Please try again."
+        );
+      }
 
-      const whatsappUrl = `https://wa.me/${WHATSAPP_NUMBER}?text=${whatsappMessage}`;
-
-      setSubmittedOrderNumber(order.order_number);
-      setSubmittedWhatsAppUrl(whatsappUrl);
-      setOrderSubmitted(true);
-
-      setCart([]);
-      localStorage.removeItem("oraia_cart");
-
-      setAppliedPromo(null);
-      setPromoInput("");
-      setPromoMessage("");
-      setPromoError("");
-
-      setCustomerName("");
-      setCustomerPhone("");
-      setCustomerEmail("");
-      setDeliveryPreference("Pickup");
-      setCustomerNote("");
+      window.location.assign(paymentData.authorization_url);
     } catch (err) {
-      // If promo redemption fails, remove the order and its items so
-      // an unsuccessful promo checkout does not leave an incomplete order.
       if (createdOrderId) {
         await supabase
           .from("order_items")
@@ -821,7 +762,7 @@ export default function Home() {
       setCheckoutError(
         err instanceof Error
           ? err.message
-          : "Unable to submit your order. Please try again."
+          : "Unable to start checkout. Please try again."
       );
     } finally {
       setCheckingOut(false);
@@ -1622,13 +1563,13 @@ export default function Home() {
                   className="mt-5 w-full rounded-full bg-gradient-to-br from-[#51324f] to-[#40253f] px-6 py-4 text-sm font-semibold text-white shadow-[0_5px_14px_rgba(64,37,63,0.24)] transition hover:-translate-y-0.5 hover:shadow-lg disabled:opacity-50"
                 >
                   {checkingOut
-                    ? "Submitting Order Request..."
-                    : "Submit Order Request"}
+                    ? "Preparing Secure Payment..."
+                    : "Pay Now"}
                 </button>
 
                 <p className="mt-3 text-center text-xs leading-5 text-gray-500">
-                  This is an order request, not a payment. Our team will
-                  contact you to confirm your order and arrange payment.
+                  You will be redirected to Paystack to complete your payment
+                  securely. Shipping charges are handled separately.
                 </p>
 
                 <button
@@ -1868,7 +1809,6 @@ export default function Home() {
           </div>
         ))}
       </section>
-
       {/* NEW ARRIVALS */}
       <section id="new-arrivals" className="mx-auto max-w-7xl px-5 py-16">
         <div className="mb-8">
