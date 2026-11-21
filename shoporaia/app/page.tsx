@@ -12,10 +12,34 @@ const supabase = createClient(
 
 const WHATSAPP_NUMBER = "2349043423379";
 
-const announcements = [
-  "CHINA PREORDER IS OPEN. SHOP YOUR FAVOURITES.",
-  "NEED SOMETHING FROM CHINA? LET ORAIA SOURCE IT FOR YOU.",
-  "QUALITY FINDS. EASY ORDERING. DELIVERY ACROSS NIGERIA.",
+const promoSlides = [
+  {
+    eyebrow: "China Preorder",
+    message: "CHINA PREORDER IS OPEN.",
+    description:
+      "Shop your favourites and discover beautiful finds from China.",
+    image:
+      "https://images.unsplash.com/photo-1483985988355-763728e1935b?w=1200",
+    alt: "Fashion shopping and clothing collection",
+  },
+  {
+    eyebrow: "Personal Shopping",
+    message: "NEED SOMETHING FROM CHINA?",
+    description:
+      "Let Oraia source your selected products from China.",
+    image:
+      "https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?w=1200",
+    alt: "Warehouse and international product sourcing",
+  },
+  {
+    eyebrow: "Quality Finds",
+    message: "QUALITY FINDS. EASY ORDERING.",
+    description:
+      "Enjoy convenient shopping and delivery across Nigeria.",
+    image:
+      "https://images.unsplash.com/photo-1607082349566-187342175e2f?w=1200",
+    alt: "Shopping packages and delivered products",
+  },
 ];
 
 type Product = {
@@ -163,7 +187,9 @@ function ProductCard({
         <button
           type="button"
           onClick={onToggleWishlist}
-          aria-label={isWishlisted ? "Remove from wishlist" : "Add to wishlist"}
+          aria-label={
+            isWishlisted ? "Remove from wishlist" : "Add to wishlist"
+          }
           className="absolute right-3 top-3 flex h-9 w-9 items-center justify-center rounded-full bg-white text-xl shadow-lg transition-all duration-300 hover:scale-110 hover:bg-[#f9eef3] active:scale-95"
         >
           <span className={isWishlisted ? "text-pink-600" : "text-gray-500"}>
@@ -247,16 +273,16 @@ export default function Home() {
   const [submittedOrderNumber, setSubmittedOrderNumber] = useState("");
   const [submittedWhatsAppUrl, setSubmittedWhatsAppUrl] = useState("");
 
-  // Continuously rotate the announcement banner.
+  // Automatically rotate only the three promotional hero slides.
   useEffect(() => {
     const interval = setInterval(() => {
-      const totalMessages = products.length > 0 ? 4 : announcements.length;
-
-      setAnnouncementIndex((previous) => (previous + 1) % totalMessages);
-    }, 4000);
+      setAnnouncementIndex(
+        (previous) => (previous + 1) % promoSlides.length
+      );
+    }, 5000);
 
     return () => clearInterval(interval);
-  }, [products.length]);
+  }, []);
 
   // Keep the homepage locked while either panel is open.
   useEffect(() => {
@@ -467,9 +493,8 @@ export default function Home() {
     0
   );
 
-  const productSavings = Math.round(
-    (originalCartTotal - cartTotal) * 100
-  ) / 100;
+  const productSavings =
+    Math.round((originalCartTotal - cartTotal) * 100) / 100;
 
   const promoEligible =
     !!appliedPromo &&
@@ -498,7 +523,9 @@ export default function Home() {
     }
 
     if (cartProducts.length === 0) {
-      setPromoError("Add products to your bag before applying a promo code.");
+      setPromoError(
+        "Add products to your bag before applying a promo code."
+      );
       return;
     }
 
@@ -536,9 +563,7 @@ export default function Home() {
         throw new Error("This promo code has reached its usage limit.");
       }
 
-      if (
-        cartTotal < Number(promo.minimum_order_amount || 0)
-      ) {
+      if (cartTotal < Number(promo.minimum_order_amount || 0)) {
         throw new Error(
           `Your product total must be at least ${formatPrice(
             Number(promo.minimum_order_amount)
@@ -710,7 +735,8 @@ export default function Home() {
           product_image: product.image || null,
           quantity: product.quantity,
           unit_price: unitPrice,
-          total_price: Math.round(unitPrice * product.quantity * 100) / 100,
+          total_price:
+            Math.round(unitPrice * product.quantity * 100) / 100,
         };
       });
 
@@ -727,7 +753,9 @@ export default function Home() {
       const accessToken = sessionData.session?.access_token;
 
       if (!accessToken) {
-        throw new Error("Your login session has expired. Please log in again.");
+        throw new Error(
+          "Your login session has expired. Please log in again."
+        );
       }
 
       const paymentResponse = await fetch("/api/paystack/initialize", {
@@ -775,15 +803,12 @@ export default function Home() {
     .filter((product) => product.isNew)
     .slice(0, 4);
 
-  const bannerMessages =
-    products.length > 0
-      ? [
-          announcements[0],
-          `JUST ARRIVED: ${products[0].name.toUpperCase()}. EXPLORE NOW.`,
-          announcements[1],
-          announcements[2],
-        ]
-      : announcements;
+  // The hero carousel now contains only the three promotional slides.
+  // New products remain visible in the separate New Arrivals section.
+  const bannerSlides = promoSlides;
+
+  const activeBanner =
+    bannerSlides[announcementIndex % bannerSlides.length];
 
   const inStockProducts = products.filter(
     (product) => product.stock
@@ -791,10 +816,6 @@ export default function Home() {
 
   const preorderProducts = products.filter(
     (product) => !product.stock
-  );
-
-  const menProducts = products.filter((product) =>
-    isMenCategory(product.category)
   );
 
   const filteredProducts = products.filter((product) => {
@@ -853,29 +874,6 @@ export default function Home() {
 
   return (
     <main className="min-h-screen overflow-x-hidden bg-white text-[#302033]">
-      {/* ROTATING ANNOUNCEMENT BAR */}
-      <div className="relative flex min-h-10 items-center justify-center overflow-hidden bg-gradient-to-r from-[#40253f] via-[#593653] to-[#40253f] px-10 py-3 text-center text-[10px] font-medium tracking-[0.16em] text-white shadow-[0_4px_14px_rgba(64,37,63,0.18)] sm:text-xs">
-        <span
-          key={announcementIndex}
-          className="animate-[fadeIn_0.6s_ease-in-out]"
-        >
-          {bannerMessages[announcementIndex % bannerMessages.length]}
-        </span>
-
-        <div className="absolute bottom-1 left-0 right-0 flex justify-center gap-1">
-          {bannerMessages.map((_, index) => (
-            <span
-              key={index}
-              className={`h-1 rounded-full transition-all ${
-                announcementIndex % bannerMessages.length === index
-                  ? "w-4 bg-white"
-                  : "w-1 bg-white/40"
-              }`}
-            />
-          ))}
-        </div>
-      </div>
-
       {/* HEADER */}
       <header className="sticky top-0 z-40 border-b border-pink-100 bg-white/95 shadow-[0_5px_18px_rgba(64,37,63,0.07)] backdrop-blur-md">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6 sm:py-4">
@@ -1121,7 +1119,6 @@ export default function Home() {
                       ["New Arrivals", "#new-arrivals"],
                       ["In-Stock Collection", "#in-stock"],
                       ["China Preorder", "#china-preorder"],
-                      ["Men's Collection", "#men-collection"],
                       ["Shop All Products", "#catalogue"],
                     ].map(([label, link]) => (
                       <a
@@ -1324,8 +1321,10 @@ export default function Home() {
 
                           {hasDiscount && (
                             <p className="mt-1 text-xs font-medium text-green-700">
-                              You save {formatPrice(
-                                (product.price - salePrice) * product.quantity
+                              You save{" "}
+                              {formatPrice(
+                                (product.price - salePrice) *
+                                  product.quantity
                               )}
                             </p>
                           )}
@@ -1860,31 +1859,78 @@ export default function Home() {
             </div>
           </div>
 
+          {/* IMAGE-BACKED PROMOTIONAL CAROUSEL */}
           <div className="relative mx-auto w-full max-w-xl">
             <div className="absolute -right-5 -top-5 h-40 w-40 rounded-full bg-[#e8cbdc] blur-3xl" />
             <div className="absolute -bottom-7 -left-5 h-40 w-40 rounded-full bg-white blur-3xl" />
 
-            <div className="relative rounded-[2.4rem] border border-white/80 bg-white/40 p-3 shadow-[0_25px_60px_rgba(64,37,63,0.18)] backdrop-blur-sm transition-transform duration-500 hover:-translate-y-2">
-              <img
-                src="https://images.unsplash.com/photo-1483985988355-763728e1935b?w=1200"
-                alt="Fashion shopping collection"
-                className="h-80 w-full rounded-[1.9rem] object-cover shadow-[0_12px_30px_rgba(64,37,63,0.18)] md:h-[480px]"
-              />
+            <div className="relative overflow-hidden rounded-[2.4rem] border border-white/80 bg-white p-3 shadow-[0_25px_60px_rgba(64,37,63,0.18)]">
+              <div className="relative overflow-hidden rounded-[1.9rem]">
+                <img
+                  key={activeBanner.image}
+                  src={activeBanner.image}
+                  alt={activeBanner.alt}
+                  className="h-80 w-full object-cover transition-opacity duration-700 md:h-[480px]"
+                />
+
+                <div className="absolute inset-0 bg-gradient-to-t from-[#241522]/90 via-[#241522]/25 to-transparent" />
+
+                <div
+                  key={activeBanner.message}
+                  className="absolute inset-x-0 bottom-0 p-6 text-white sm:p-9"
+                >
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.25em] text-pink-200">
+                    Shop with Oraia · {activeBanner.eyebrow}
+                  </p>
+
+                  <h2 className="mt-3 max-w-md text-2xl font-semibold leading-tight sm:text-3xl md:text-4xl">
+                    {activeBanner.message}
+                  </h2>
+
+                  <p className="mt-3 max-w-sm text-sm leading-6 text-white/90">
+                    {activeBanner.description}
+                  </p>
+
+                  <a
+                    href={
+                      activeBanner.eyebrow === "Personal Shopping"
+                        ? "#services"
+                        : "#catalogue"
+                    }
+                    className="mt-5 inline-flex rounded-full bg-white px-6 py-3 text-xs font-semibold text-[#40253f] shadow-lg transition hover:-translate-y-1 hover:bg-pink-100"
+                  >
+                    {activeBanner.eyebrow === "Personal Shopping"
+                      ? "Explore Our Services"
+                      : "Shop Now"}
+                  </a>
+                </div>
+              </div>
             </div>
 
-            <div className="absolute -bottom-5 left-4 rounded-2xl border border-white/80 bg-white/95 px-5 py-4 shadow-[0_12px_28px_rgba(64,37,63,0.16)] sm:left-8">
-              <p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-[#b47c9c]">
-                Shop with Oraia
-              </p>
-              <p className="mt-1 text-sm font-semibold text-[#40253f]">
-                Find what you love.
-              </p>
+            {/* MANUAL SLIDE CONTROLS */}
+            <div className="mt-6 flex items-center justify-center gap-3">
+              {bannerSlides.map((slide, index) => (
+                <button
+                  key={`${slide.eyebrow}-${index}`}
+                  type="button"
+                  onClick={() => setAnnouncementIndex(index)}
+                  aria-label={`Show promotion ${index + 1}: ${slide.eyebrow}`}
+                  aria-pressed={
+                    announcementIndex % bannerSlides.length === index
+                  }
+                  className={`h-2 rounded-full transition-all duration-300 ${
+                    announcementIndex % bannerSlides.length === index
+                      ? "w-9 bg-[#40253f]"
+                      : "w-2 bg-[#cda9bf] hover:bg-[#ad7191]"
+                  }`}
+                />
+              ))}
             </div>
           </div>
         </div>
       </section>
 
-      {/* CATEGORIES - NOW DIRECTLY BELOW HERO */}
+      {/* CATEGORIES */}
       <section
         id="categories"
         className="bg-gradient-to-br from-[#f9eef3] to-[#f0dfe9] px-5 py-16"
@@ -1925,7 +1971,11 @@ export default function Home() {
         {[
           ["01", "Quality Finds", "Carefully sourced products."],
           ["02", "Easy Ordering", "Shop multiple products in one order."],
-          ["03", "Delivery Options", "Choose pickup or paid delivery in Nigeria."],
+          [
+            "03",
+            "Delivery Options",
+            "Choose pickup or paid delivery in Nigeria.",
+          ],
         ].map((item) => (
           <div
             key={item[0]}
@@ -2035,66 +2085,15 @@ export default function Home() {
         )}
       </section>
 
-      {/* MEN'S COLLECTION */}
-      <section
-        id="men-collection"
-        className="bg-gradient-to-br from-[#fcf7fa] to-[#f4e8ef] px-5 py-16"
-      >
-        <div className="mx-auto max-w-7xl">
-          <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
-            <div>
-              <p className="text-xs uppercase tracking-widest text-[#b47c9c]">
-                The Men's Edit
-              </p>
-
-              <h2 className="mt-2 text-3xl font-semibold text-[#40253f]">
-                Shop Men
-              </h2>
-
-              <p className="mt-3 text-sm text-gray-500">
-                Explore our collection of men's fashion and essentials.
-              </p>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => selectCategory("Men")}
-              className="rounded-full border border-[#40253f] px-5 py-3 text-xs font-semibold text-[#40253f] transition hover:bg-[#40253f] hover:text-white"
-            >
-              Explore Men's Products
-            </button>
-          </div>
-
-          {loading ? (
-            <p className="py-8 text-center text-gray-500">
-              Loading products...
-            </p>
-          ) : menProducts.length > 0 ? (
-            <div className="grid grid-cols-2 gap-5 md:grid-cols-4">
-              {menProducts.slice(0, 8).map(renderProductCard)}
-            </div>
-          ) : (
-            <div className="rounded-2xl border border-pink-100 bg-white p-8 text-center">
-              <p className="font-medium text-[#40253f]">
-                Men's collection coming soon.
-              </p>
-              <p className="mt-2 text-sm text-gray-500">
-                New products will appear here when added to the men's category.
-              </p>
-            </div>
-          )}
-        </div>
-      </section>
-
-      {/* PRODUCT CATALOGUE */}
+      {/* SHOP ALL PRODUCTS */}
       <section id="catalogue" className="mx-auto max-w-7xl px-5 py-16">
         <div className="mb-8 flex flex-wrap items-end justify-between gap-5">
           <div>
             <p className="text-xs uppercase tracking-widest text-[#b47c9c]">
-              Curated For You
+              The Oraia Collection
             </p>
             <h2 className="mt-2 text-3xl font-semibold text-[#40253f]">
-              Explore Our Products
+              Shop All Products
             </h2>
           </div>
 
