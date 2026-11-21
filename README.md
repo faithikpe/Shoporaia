@@ -1,2 +1,3 @@
-# Oraia-by-Dara
+# Shoporaia
+
 Official Oraia by Dara online store
