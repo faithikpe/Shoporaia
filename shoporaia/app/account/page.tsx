@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
@@ -54,13 +55,6 @@ type CustomerOrder = {
   tracking_number: string | null;
   shipping_carrier: string | null;
   shipping_notes: string | null;
-  shipping_tracking_url: string | null;
-  shipping_dispatch_date: string | null;
-  shipping_estimated_delivery: string | null;
-  shipping_fee: number;
-  shipping_payment_status: string | null;
-  shipping_payment_reference: string | null;
-  shipping_paid_at: string | null;
   subtotal: number;
   total_amount: number;
   currency: string | null;
@@ -158,7 +152,6 @@ function statusStyle(status: string | null | undefined) {
 
   if (
     value === "paid" ||
-    value.includes("successful") ||
     value.includes("delivered") ||
     value.includes("completed") ||
     value.includes("confirmed")
@@ -186,34 +179,11 @@ function statusStyle(status: string | null | undefined) {
   return "bg-gray-100 text-gray-700";
 }
 
-function needsPayment(order: CustomerOrder) {
-  const paymentStatus = (order.payment_status || "").toLowerCase().trim();
-  const orderStatus = (order.order_status || "").toLowerCase().trim();
-
-  if (
-    orderStatus.includes("cancelled") ||
-    orderStatus.includes("canceled")
-  ) {
-    return false;
-  }
-
-  return ![
-    "paid",
-    "success",
-    "successful",
-    "completed",
-    "fully paid",
-  ].includes(paymentStatus);
-}
-
 export default function AccountPage() {
   const router = useRouter();
 
   const [userId, setUserId] = useState("");
   const [view, setView] = useState<AccountView>("dashboard");
-
-  const [accountType, setAccountType] = useState("customer");
-  const [upgradingAccount, setUpgradingAccount] = useState(false);
 
   const [profile, setProfile] = useState<CustomerProfile>({
     full_name: "",
@@ -238,10 +208,8 @@ export default function AccountPage() {
   });
 
   const [addresses, setAddresses] = useState<CustomerAddress[]>([]);
-  const [addressForm, setAddressForm] =
-    useState<AddressForm>(emptyAddress);
-  const [editingAddressId, setEditingAddressId] =
-    useState<string | null>(null);
+  const [addressForm, setAddressForm] = useState<AddressForm>(emptyAddress);
+  const [editingAddressId, setEditingAddressId] = useState<string | null>(null);
   const [showAddressForm, setShowAddressForm] = useState(false);
 
   const [orders, setOrders] = useState<CustomerOrder[]>([]);
@@ -252,11 +220,57 @@ export default function AccountPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [payingOrderId, setPayingOrderId] = useState<string | null>(null);
-  const [payingShippingOrderId, setPayingShippingOrderId] =
-    useState<string | null>(null);
-  const [downloadingReceiptId, setDownloadingReceiptId] =
-    useState<string | null>(null);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
 
+  const loadAccount = useCallback(async () => {
+    setLoading(true);
+    setError("");
+
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+
+    if (authError || !user || !user.email_confirmed_at) {
+      router.replace("/login", {});
+      return;
+    }
+
+    setUserId(user.id);
+
+    const { data: profileData, error: profileError } = await supabase
+      .from("customer_profiles")
+      .select(
+        "full_name, username, email, phone, country, state, city, delivery_address"
+      )
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (profileError) {
+      setError("Unable to load your profile. Please refresh the page.");
+    }
+
+    const loadedProfile: CustomerProfile = {
+      full_name: profileData?.full_name || "",
+      username: profileData?.username || "",
+      email: profileData?.email || user.email || "",
+      phone: profileData?.phone || "",
+      country: profileData?.country || "Nigeria",
+      state: profileData?.state || "",
+      city: profileData?.city || "",
+      delivery_address: profileData?.delivery_address || "",
+    };
+
+    setProfile(loadedProfile);
+    setProfileForm(loadedProfile);
+
+    const { data: addressData } = await supabase
+      .from("customer_addresses")
+      .select("*")
+      .eq("user_id", user.id)
+
+  const [payingOrderId, setPayingOrderId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
@@ -279,7 +293,7 @@ export default function AccountPage() {
     const { data: profileData, error: profileError } = await supabase
       .from("customer_profiles")
       .select(
-        "full_name, username, email, phone, country, state, city, delivery_address, account_type"
+        "full_name, username, email, phone, country, state, city, delivery_address"
       )
       .eq("user_id", user.id)
       .maybeSingle();
@@ -287,8 +301,6 @@ export default function AccountPage() {
     if (profileError) {
       setError("Unable to load your profile. Please refresh the page.");
     }
-
-    setAccountType(profileData?.account_type || "customer");
 
     const loadedProfile: CustomerProfile = {
       full_name: profileData?.full_name || "",
@@ -304,16 +316,12 @@ export default function AccountPage() {
     setProfile(loadedProfile);
     setProfileForm(loadedProfile);
 
-    const { data: addressData, error: addressError } = await supabase
+    const { data: addressData } = await supabase
       .from("customer_addresses")
       .select("*")
       .eq("user_id", user.id)
       .order("is_default", { ascending: false })
       .order("created_at", { ascending: false });
-
-    if (addressError) {
-      setError("Unable to load your saved addresses.");
-    }
 
     setAddresses((addressData || []) as CustomerAddress[]);
 
@@ -333,14 +341,10 @@ export default function AccountPage() {
     if (customerOrders.length > 0) {
       const orderIds = customerOrders.map((order) => order.id);
 
-      const { data: itemData, error: itemError } = await supabase
+      const { data: itemData } = await supabase
         .from("order_items")
         .select("*")
         .in("order_id", orderIds);
-
-      if (itemError) {
-        setError("Unable to load your order items.");
-      }
 
       const itemsWithImages = await Promise.all(
         (itemData || []).map(async (item) => {
@@ -373,7 +377,7 @@ export default function AccountPage() {
       .order("created_at", { ascending: false });
 
     if (invoiceError) {
-      setError("Unable to load your invoices.");
+      setError("Unable to load your invoices. Please refresh the page.");
     }
 
     setInvoices((invoiceData || []) as CustomerInvoice[]);
@@ -385,7 +389,7 @@ export default function AccountPage() {
       .order("created_at", { ascending: false });
 
     if (receiptError) {
-      setError("Unable to load your receipts.");
+      setError("Unable to load your receipts. Please refresh the page.");
     }
 
     setReceipts((receiptData || []) as CustomerReceipt[]);
@@ -468,42 +472,6 @@ export default function AccountPage() {
     setSaving(false);
   }
 
-  // UPDATED DROPSHIPPER ACTIVATION
-  async function becomeDropshipper() {
-    if (!userId || upgradingAccount) return;
-
-    setUpgradingAccount(true);
-    setError("");
-    setMessage("");
-
-    try {
-      const { data, error: rpcError } = await supabase.rpc(
-        "activate_dropshipper"
-      );
-
-      if (rpcError) {
-        throw new Error(rpcError.message);
-      }
-
-      if (data !== true) {
-        throw new Error(
-          "No customer profile was updated. Please contact support."
-        );
-      }
-
-      setAccountType("dropshipper");
-      setMessage("Your dropshipper account is now active!");
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? `Unable to activate dropshipper account: ${err.message}`
-          : "Unable to activate your dropshipper account."
-      );
-    } finally {
-      setUpgradingAccount(false);
-    }
-  }
-
   function openNewAddress() {
     setAddressForm({
       ...emptyAddress,
@@ -582,6 +550,7 @@ export default function AccountPage() {
           .update(addressPayload)
           .eq("id", editingAddressId)
           .eq("user_id", userId)
+
       : await supabase.from("customer_addresses").insert(addressPayload);
 
     if (result.error) {
@@ -663,10 +632,8 @@ export default function AccountPage() {
     setPayingOrderId(orderId);
 
     try {
-      const {
-        data: sessionData,
-        error: sessionError,
-      } = await supabase.auth.getSession();
+      const { data: sessionData, error: sessionError } =
+        await supabase.auth.getSession();
 
       if (sessionError) throw sessionError;
 
@@ -706,146 +673,6 @@ export default function AccountPage() {
     }
   }
 
-  async function continueShippingPayment(orderId: string) {
-    if (payingShippingOrderId) return;
-
-    setError("");
-    setMessage("");
-    setPayingShippingOrderId(orderId);
-
-    try {
-      const {
-        data: sessionData,
-        error: sessionError,
-      } = await supabase.auth.getSession();
-
-      if (sessionError) throw sessionError;
-
-      const accessToken = sessionData.session?.access_token;
-
-      if (!accessToken) {
-        throw new Error(
-          "Your login session has expired. Please log in again."
-        );
-      }
-
-      const response = await fetch(
-        "/api/paystack/shipping/initialize",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${accessToken}`,
-          },
-          body: JSON.stringify({ orderId }),
-        }
-      );
-
-      const result = await response.json();
-
-      if (!response.ok || !result.authorization_url) {
-        throw new Error(
-          result.error || "Unable to initialize shipping payment."
-        );
-      }
-
-      window.location.assign(result.authorization_url);
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Unable to continue shipping payment. Please try again."
-      );
-
-      setPayingShippingOrderId(null);
-    }
-  }
-
-  async function downloadReceipt(
-    receiptId: string,
-    receiptNumber: string
-  ) {
-    if (downloadingReceiptId) return;
-
-    setError("");
-    setMessage("");
-    setDownloadingReceiptId(receiptId);
-
-    let downloadUrl: string | null = null;
-
-    try {
-      const {
-        data: { session },
-        error: sessionError,
-      } = await supabase.auth.getSession();
-
-      if (sessionError) throw sessionError;
-
-      const accessToken = session?.access_token;
-
-      if (!accessToken) {
-        throw new Error(
-          "Your session has expired. Please log in again."
-        );
-      }
-
-      const response = await fetch(
-        `/api/receipts/${encodeURIComponent(receiptId)}`,
-        {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-        }
-      );
-
-      if (!response.ok) {
-        let errorMessage = "Unable to download receipt.";
-
-        try {
-          const result = await response.json();
-          errorMessage = result.error || errorMessage;
-        } catch {
-          // Keep the default error message if the response is not JSON.
-        }
-
-        throw new Error(errorMessage);
-      }
-
-      const blob = await response.blob();
-
-      if (!blob.size) {
-        throw new Error("The receipt PDF appears to be empty.");
-      }
-
-      downloadUrl = URL.createObjectURL(blob);
-
-      const link = document.createElement("a");
-      link.href = downloadUrl;
-      link.download = `Oraia-Receipt-${receiptNumber}.pdf`;
-
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-
-      setMessage("Your receipt has been downloaded successfully.");
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Unable to download receipt. Please try again."
-      );
-    } finally {
-      if (downloadUrl) {
-        window.setTimeout(() => {
-          URL.revokeObjectURL(downloadUrl!);
-        }, 1000);
-      }
-
-      setDownloadingReceiptId(null);
-    }
-  }
-
   async function signOut() {
     await supabase.auth.signOut();
     router.replace("/login");
@@ -870,21 +697,20 @@ export default function AccountPage() {
   const outstandingBalance = invoices.reduce((total, invoice) => {
     const status = (invoice.payment_status || "").toLowerCase();
 
-    if (
-      status === "paid" ||
-      status === "completed" ||
-      status === "successful"
-    ) {
+    if (status === "paid" || status === "completed") {
       return total;
     }
 
     const paymentsForInvoice = receipts
       .filter((receipt) => receipt.order_id === invoice.order_id)
-      .reduce((sum, receipt) => sum + Number(receipt.amount || 0), 0);
+      .reduce(
+        (sum, receipt) => sum + Number(receipt.amount || 0),
+        0
+      );
 
-    return (
-      total +
-      Math.max(0, Number(invoice.amount || 0) - paymentsForInvoice)
+    return total + Math.max(
+      0,
+      Number(invoice.amount || 0) - paymentsForInvoice
     );
   }, 0);
 
@@ -892,8 +718,6 @@ export default function AccountPage() {
     (total, receipt) => total + Number(receipt.amount || 0),
     0
   );
-
-  const pendingOrders = orders.filter(needsPayment);
 
   const pageTitle: Record<AccountView, string> = {
     dashboard: "My Account",
@@ -987,7 +811,7 @@ export default function AccountPage() {
                   className={`w-full rounded-xl px-4 py-3 text-left text-sm font-medium transition ${
                     view === key
                       ? "bg-[#75436d] text-white"
-                      : "text-[#493a49] hover:bg-[#f9edf5]"
+                      : "text-[#5f4b5c] hover:bg-[#f9edf5]"
                   }`}
                 >
                   {label}
@@ -997,47 +821,8 @@ export default function AccountPage() {
           </aside>
 
           <section className="min-w-0">
-            {/* DASHBOARD */}
             {view === "dashboard" && (
               <div className="space-y-6">
-                {/* DROPSHIPPER ACCOUNT */}
-                <div className="rounded-2xl border border-[#eadce6] bg-white p-6 shadow-sm">
-                  <h2 className="text-lg font-bold text-[#43243b]">
-                    Dropshipper Account
-                  </h2>
-
-                  {accountType === "dropshipper" ? (
-                    <div className="mt-3">
-                      <span className="rounded-full bg-green-100 px-3 py-2 text-xs font-semibold text-green-800">
-                        Dropshipper Active
-                      </span>
-
-                      <p className="mt-3 text-sm leading-6 text-[#756574]">
-                        Your account has dropshipper access. Wholesale
-                        pricing and minimum order quantities will be
-                        available on eligible products.
-                      </p>
-                    </div>
-                  ) : (
-                    <>
-                      <p className="mt-2 text-sm leading-6 text-[#756574]">
-                        Become an Oraia dropshipper and access wholesale
-                        prices on eligible products.
-                      </p>
-
-                      <button
-                        onClick={becomeDropshipper}
-                        disabled={upgradingAccount}
-                        className="mt-4 rounded-xl bg-[#75436d] px-6 py-3 text-sm font-semibold text-white hover:bg-[#603657] disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {upgradingAccount
-                          ? "Activating..."
-                          : "Become a Dropshipper"}
-                      </button>
-                    </>
-                  )}
-                </div>
-
                 <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                   {[
                     {
@@ -1078,25 +863,6 @@ export default function AccountPage() {
                     </button>
                   ))}
                 </div>
-
-                {pendingOrders.length > 0 && (
-                  <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5">
-                    <h2 className="font-bold text-amber-900">
-                      Payments awaiting completion
-                    </h2>
-                    <p className="mt-1 text-sm text-amber-800">
-                      You have {pendingOrders.length} order
-                      {pendingOrders.length === 1 ? "" : "s"} with an
-                      outstanding payment.
-                    </p>
-                    <button
-                      onClick={() => navigate("orders")}
-                      className="mt-3 text-sm font-bold text-[#75436d] hover:underline"
-                    >
-                      View orders and continue payment →
-                    </button>
-                  </div>
-                )}
 
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="rounded-2xl border border-[#f0e2ec] bg-white p-6 shadow-sm">
@@ -1161,11 +927,7 @@ export default function AccountPage() {
                             <p className="mt-1 text-xs text-[#756574]">
                               {formatDate(order.created_at)}
                             </p>
-                            <p className="mt-1 text-xs text-[#756574]">
-                              Payment: {order.payment_status || "Pending"}
-                            </p>
                           </div>
-
                           <div className="text-right">
                             <p className="font-semibold text-[#43243b]">
                               {formatMoney(
@@ -1180,18 +942,6 @@ export default function AccountPage() {
                             >
                               {order.order_status || "Pending"}
                             </span>
-
-                            {needsPayment(order) && (
-                              <button
-                                onClick={() => continuePayment(order.id)}
-                                disabled={payingOrderId !== null}
-                                className="mt-3 block rounded-lg bg-[#75436d] px-4 py-2 text-xs font-semibold text-white hover:bg-[#603657] disabled:cursor-not-allowed disabled:opacity-60"
-                              >
-                                {payingOrderId === order.id
-                                  ? "Redirecting..."
-                                  : "Continue Payment"}
-                              </button>
-                            )}
                           </div>
                         </div>
                       ))}
@@ -1201,7 +951,6 @@ export default function AccountPage() {
               </div>
             )}
 
-            {/* PROFILE */}
             {view === "profile" && (
               <div className="rounded-2xl border border-[#f0e2ec] bg-white p-6 shadow-sm sm:p-8">
                 <h2 className="mb-6 text-xl font-bold text-[#43243b]">
@@ -1328,7 +1077,6 @@ export default function AccountPage() {
               </div>
             )}
 
-            {/* ADDRESSES */}
             {view === "addresses" && (
               <div className="space-y-5">
                 <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1351,434 +1099,64 @@ export default function AccountPage() {
                   )}
                 </div>
 
-                {showAddressForm && (
-                  <div className="rounded-2xl border border-[#f0e2ec] bg-white p-6 shadow-sm">
-                    <h3 className="mb-5 font-bold text-[#43243b]">
-                      {editingAddressId ? "Edit Address" : "Add New Address"}
-                    </h3>
-
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      {(
-                        [
-                          ["full_name", "Full Name"],
-                          ["phone", "Phone Number"],
-                          ["country", "Country"],
-                          ["state", "State"],
-                          ["city", "City"],
-                          ["address_label", "Address Label"],
-                        ] as [keyof AddressForm, string][]
-                      ).map(([key, label]) => (
-                        <div key={key}>
-                          <label className={labelStyle}>{label}</label>
-                          <input
-                            className={inputStyle}
-                            value={String(addressForm[key] ?? "")}
-                            onChange={(e) =>
-                              setAddressForm({
-                                ...addressForm,
-                                [key]: e.target.value,
-                              })
-                            }
-                          />
-                        </div>
-                      ))}
-
-                      <div className="sm:col-span-2">
-                        <label className={labelStyle}>
-                          Full Delivery Address
-                        </label>
-                        <textarea
-                          className={inputStyle}
-                          rows={3}
-                          value={addressForm.delivery_address}
-                          onChange={(e) =>
-                            setAddressForm({
-                              ...addressForm,
-                              delivery_address: e.target.value,
-                            })
-                          }
-                          placeholder="House number, street, area and other details"
-                        />
-                      </div>
-
-                      <label className="flex items-center gap-3 text-sm text-[#43243b] sm:col-span-2">
-                        <input
-                          type="checkbox"
-                          checked={addressForm.is_default}
-                          onChange={(e) =>
-                            setAddressForm({
-                              ...addressForm,
-                              is_default: e.target.checked,
-                            })
-                          }
-                          className="h-4 w-4 accent-[#75436d]"
-                        />
-                        Set as my default delivery address
-                      </label>
-                    </div>
-
-                    <div className="mt-6 flex flex-wrap gap-3">
-                      <button
-                        onClick={saveAddress}
-                        disabled={saving}
-                        className="rounded-xl bg-[#75436d] px-6 py-3 text-sm font-semibold text-white hover:bg-[#603657] disabled:opacity-60"
-                      >
-                        {saving ? "Saving..." : "Save Address"}
-                      </button>
-
-                      <button
-                        onClick={() => setShowAddressForm(false)}
-                        className="rounded-xl border border-[#eadce6] px-6 py-3 text-sm font-semibold text-[#43243b]"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {addresses.length === 0 && !showAddressForm ? (
-                  <div className="rounded-2xl border border-[#f0e2ec] bg-white p-8 text-center">
-                    <p className="font-semibold text-[#43243b]">
-                      No saved addresses yet
-                    </p>
-                    <p className="mt-2 text-sm text-[#756574]">
-                      Add an address to make delivery easier.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="grid gap-4 md:grid-cols-2">
-                    {addresses.map((address) => (
-                      <div
-                        key={address.id}
-                        className="rounded-2xl border border-[#f0e2ec] bg-white p-5 shadow-sm"
-                      >
-                        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                          <h3 className="font-bold text-[#43243b]">
-                            {address.address_label || "Delivery Address"}
-                          </h3>
-
-                          {address.is_default && (
-                            <span className="rounded-full bg-[#f9edf5] px-3 py-1 text-xs font-semibold text-[#75436d]">
-                              Default
-                            </span>
-                          )}
+                            {order.shipping_status || "Not shipped"}
+                          </p>
                         </div>
 
-                        <p className="font-medium text-[#302331]">
-                          {address.full_name}
-                        </p>
-                        <p className="mt-1 text-sm text-[#756574]">
-                          {address.phone}
-                        </p>
-                        <p className="mt-3 text-sm leading-6 text-[#493a49]">
-                          {address.delivery_address}
-                          <br />
-                          {address.city}, {address.state}
-                          <br />
-                          {address.country}
-                        </p>
-
-                        <div className="mt-5 flex flex-wrap gap-3 border-t border-[#f0e2ec] pt-4">
-                          <button
-                            onClick={() => openEditAddress(address)}
-                            className="text-sm font-semibold text-[#75436d] hover:underline"
-                          >
-                            Edit
-                          </button>
-
-                          <button
-                            onClick={() => deleteAddress(address.id)}
-                            className="text-sm font-semibold text-red-600 hover:underline"
-                          >
-                            Delete
-                          </button>
-
-                          {!address.is_default && (
-                            <button
-                              onClick={() => setDefaultAddress(address.id)}
-                              className="text-sm font-semibold text-[#75436d] hover:underline"
-                            >
-                              Make Default
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* ORDERS */}
-            {view === "orders" && (
-              <div className="space-y-5">
-                <div>
-                  <h2 className="text-xl font-bold text-[#43243b]">
-                    My Orders
-                  </h2>
-                  <p className="mt-1 text-sm text-[#756574]">
-                    View your orders, payment status and delivery updates.
-                  </p>
-                </div>
-
-                {orders.length === 0 ? (
-                  <div className="rounded-2xl border border-[#f0e2ec] bg-white p-10 text-center">
-                    <h3 className="font-bold text-[#43243b]">
-                      No orders yet
-                    </h3>
-                    <p className="mt-2 text-sm text-[#756574]">
-                      Your orders will appear here after checkout.
-                    </p>
-                    <button
-                      onClick={() => router.push("/")}
-                      className="mt-5 rounded-xl bg-[#75436d] px-6 py-3 text-sm font-semibold text-white"
-                    >
-                      Start Shopping
-                    </button>
-                  </div>
-                ) : (
-                  orders.map((order) => (
-                    <div
-                      key={order.id}
-                      className="rounded-2xl border border-[#f0e2ec] bg-white p-5 shadow-sm sm:p-6"
-                    >
-                      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-[#f0e2ec] pb-4">
                         <div>
                           <p className="text-xs text-[#756574]">
-                            Order Number
+                            Shipping Carrier
                           </p>
-                          <h3 className="mt-1 text-lg font-bold text-[#43243b]">
-                            {order.order_number}
-                          </h3>
-                          <p className="mt-1 text-xs text-[#756574]">
-                            Placed on {formatDate(order.created_at)}
+                          <p className="mt-1 text-sm font-medium text-[#43243b]">
+                            {order.shipping_carrier || "Not yet assigned"}
                           </p>
                         </div>
 
-                        <div className="flex flex-wrap gap-2">
-                          <span
-                            className={`rounded-full px-3 py-1 text-xs font-semibold ${statusStyle(
-                              order.order_status
-                            )}`}
-                          >
-                            {order.order_status || "Pending"}
-                          </span>
-                          <span
-                            className={`rounded-full px-3 py-1 text-xs font-semibold ${statusStyle(
-                              order.payment_status
-                            )}`}
-                          >
-                            Payment: {order.payment_status || "Pending"}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="space-y-3 py-4">
-                        {itemsForOrder(order.id).length > 0 ? (
-                          itemsForOrder(order.id).map((item) => (
-                            <div
-                              key={item.id}
-                              className="flex items-center gap-3"
-                            >
-                              {item.product_image ? (
-                                <img
-                                  src={item.product_image}
-                                  alt={item.product_name}
-                                  className="h-16 w-16 rounded-xl border border-[#f0e2ec] object-cover"
-                                />
-                              ) : (
-                                <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-[#f9edf5] text-xs text-[#75436d]">
-                                  Oraia
-                                </div>
-                              )}
-
-                              <div className="min-w-0 flex-1">
-                                <p className="font-medium text-[#43243b]">
-                                  {item.product_name}
-                                </p>
-                                <p className="mt-1 text-xs text-[#756574]">
-                                  Quantity: {item.quantity}
-                                </p>
-                              </div>
-
-                              <p className="text-sm font-semibold text-[#43243b]">
-                                {formatMoney(
-                                  item.total_price,
-                                  order.currency || "NGN"
-                                )}
-                              </p>
-                            </div>
-                          ))
-                        ) : (
-                          <p className="text-sm text-[#756574]">
-                            Order items are not available.
-                          </p>
-                        )}
-                      </div>
-
-                      <div className="flex flex-wrap items-center justify-between gap-4 border-t border-[#f0e2ec] pt-4">
                         <div>
                           <p className="text-xs text-[#756574]">
-                            Order Total
+                            Tracking Number
                           </p>
-                          <p className="mt-1 text-xl font-bold text-[#43243b]">
-                            {formatMoney(
-                              order.total_amount,
-                              order.currency || "NGN"
-                            )}
+                          <p className="mt-1 break-all text-sm font-medium text-[#43243b]">
+                            {order.tracking_number || "Not yet available"}
                           </p>
                         </div>
-
-                        {needsPayment(order) ? (
-                          <button
-                            onClick={() => continuePayment(order.id)}
-                            disabled={payingOrderId !== null}
-                            className="rounded-xl bg-[#75436d] px-6 py-3 text-sm font-semibold text-white transition hover:bg-[#603657] disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            {payingOrderId === order.id
-                              ? "Redirecting to payment..."
-                              : "Continue Payment"}
-                          </button>
-                        ) : (
-                          <span className="rounded-xl bg-green-50 px-4 py-3 text-sm font-semibold text-green-700">
-                            Payment completed
-                          </span>
-                        )}
                       </div>
 
-                      {/* DELIVERY INFORMATION AND TRACKING */}
-                      {(order.shipping_status ||
-                        order.tracking_number ||
-                        order.shipping_carrier ||
-                        order.shipping_notes ||
-                        order.shipping_tracking_url ||
-                        order.shipping_dispatch_date ||
-                        order.shipping_estimated_delivery) && (
+                      {order.shipping_notes && (
                         <div className="mt-4 rounded-xl bg-[#fff8fc] p-4">
-                          <h4 className="mb-2 text-sm font-bold text-[#43243b]">
-                            Delivery Information
-                          </h4>
-
-                          {order.shipping_status && (
-                            <p className="text-sm text-[#756574]">
-                              Shipping status: {order.shipping_status}
-                            </p>
-                          )}
-
-                          {order.shipping_carrier && (
-                            <p className="mt-1 text-sm text-[#756574]">
-                              Carrier: {order.shipping_carrier}
-                            </p>
-                          )}
-
-                          {order.tracking_number && (
-                            <p className="mt-1 text-sm text-[#756574]">
-                              Tracking number: {order.tracking_number}
-                            </p>
-                          )}
-
-                          {order.shipping_dispatch_date && (
-                            <p className="mt-1 text-sm text-[#756574]">
-                              Dispatch Date:{" "}
-                              {formatDate(order.shipping_dispatch_date)}
-                            </p>
-                          )}
-
-                          {order.shipping_estimated_delivery && (
-                            <p className="mt-1 text-sm text-[#756574]">
-                              Estimated Delivery:{" "}
-                              {formatDate(order.shipping_estimated_delivery)}
-                            </p>
-                          )}
-
-                          {order.shipping_notes && (
-                            <p className="mt-2 text-sm leading-6 text-[#756574]">
-                              {order.shipping_notes}
-                            </p>
-                          )}
-
-                          {order.shipping_tracking_url && (
-                            <a
-                              href={order.shipping_tracking_url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="mt-3 inline-block text-sm font-semibold text-[#75436d] underline"
-                            >
-                              Track Your Shipment →
-                            </a>
-                          )}
+                          <p className="text-xs font-semibold text-[#75436d]">
+                            Delivery Update
+                          </p>
+                          <p className="mt-1 text-sm leading-6 text-[#493a49]">
+                            {order.shipping_notes}
+                          </p>
                         </div>
                       )}
 
-                      {/* SHIPPING PAYMENT */}
-                      {Number(order.shipping_fee || 0) > 0 && (
-                        <div className="mt-4 rounded-xl border border-[#eadce6] bg-[#fff8fc] p-5">
-                          <div className="flex flex-wrap items-center justify-between gap-3">
-                            <div>
-                              <h4 className="font-bold text-[#43243b]">
-                                Shipping Payment
-                              </h4>
-
-                              <p className="mt-2 text-sm text-[#756574]">
-                                Shipping Fee
-                              </p>
-
-                              <p className="mt-1 text-xl font-bold text-[#43243b]">
-                                {formatMoney(
-                                  Number(order.shipping_fee),
-                                  order.currency || "NGN"
-                                )}
-                              </p>
-                            </div>
-
-                            <span
-                              className={`rounded-full px-3 py-1 text-xs font-semibold ${statusStyle(
-                                order.shipping_payment_status || "Pending"
-                              )}`}
-                            >
-                              {order.shipping_payment_status || "Pending"}
-                            </span>
-                          </div>
-
-                          {order.shipping_payment_status?.toLowerCase() ===
-                          "paid" ? (
-                            <p className="mt-4 rounded-lg bg-green-50 p-3 text-sm font-medium text-green-700">
-                              Shipping payment completed.
-                              {order.shipping_paid_at && (
-                                <span className="mt-1 block text-xs">
-                                  Paid on {formatDate(order.shipping_paid_at)}
-                                </span>
-                              )}
-                            </p>
-                          ) : order.order_status
-                              ?.toLowerCase()
-                              .includes("cancel") ? (
-                            <p className="mt-4 text-sm text-red-600">
-                              Shipping payment is unavailable for this
-                              cancelled order.
-                            </p>
-                          ) : (
+                      {order.payment_status?.toUpperCase() !== "PAID" &&
+                        order.order_status?.toUpperCase() !== "CANCELLED" && (
+                          <div className="mt-5 border-t border-[#f0e2ec] pt-4">
                             <button
-                              onClick={() =>
-                                continueShippingPayment(order.id)
-                              }
-                              disabled={payingShippingOrderId !== null}
-                              className="mt-4 w-full rounded-xl bg-[#75436d] px-6 py-3 text-sm font-semibold text-white transition hover:bg-[#603657] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+                              type="button"
+                              onClick={() => continuePayment(order.id)}
+                              disabled={payingOrderId !== null}
+                              className="w-full rounded-xl bg-gradient-to-r from-[#75436d] to-[#43243b] px-5 py-3.5 text-sm font-semibold text-white shadow-md transition hover:-translate-y-0.5 hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
                             >
-                              {payingShippingOrderId === order.id
-                                ? "Redirecting to payment..."
-                                : "Pay Shipping Fee"}
+                              {payingOrderId === order.id
+                                ? "Opening Secure Payment..."
+                                : "Continue Payment"}
                             </button>
-                          )}
-                        </div>
-                      )}
-                    </div>
+                            <p className="mt-2 text-xs text-[#756574]">
+                              Complete payment for this order without placing a new order.
+                            </p>
+                          </div>
+                        )}
+                    </article>
                   ))
                 )}
               </div>
             )}
 
-            {/* INVOICES */}
             {view === "invoices" && (
               <div className="space-y-5">
                 <div>
@@ -1786,26 +1164,26 @@ export default function AccountPage() {
                     My Invoices
                   </h2>
                   <p className="mt-1 text-sm text-[#756574]">
-                    View your invoices and outstanding balances.
+                    View your invoices and payment status.
                   </p>
                 </div>
 
                 {invoices.length === 0 ? (
-                  <div className="rounded-2xl border border-[#f0e2ec] bg-white p-10 text-center">
-                    <h3 className="font-bold text-[#43243b]">
+                  <div className="rounded-2xl border border-[#f0e2ec] bg-white p-8 text-center">
+                    <p className="font-semibold text-[#43243b]">
                       No invoices available
-                    </h3>
+                    </p>
                     <p className="mt-2 text-sm text-[#756574]">
-                      Your invoices will appear here when available.
+                      Invoices created for your orders will appear here.
                     </p>
                   </div>
                 ) : (
                   invoices.map((invoice) => (
-                    <div
+                    <article
                       key={invoice.id}
                       className="rounded-2xl border border-[#f0e2ec] bg-white p-5 shadow-sm"
                     >
-                      <div className="flex flex-wrap items-start justify-between gap-4">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
                         <div>
                           <p className="text-xs text-[#756574]">
                             Invoice Number
@@ -1823,26 +1201,17 @@ export default function AccountPage() {
                             invoice.payment_status
                           )}`}
                         >
-                          {invoice.payment_status || "Pending"}
+                          {invoice.payment_status}
                         </span>
                       </div>
 
-                      <div className="mt-4 grid gap-3 border-t border-[#f0e2ec] pt-4 sm:grid-cols-2">
+                      <div className="mt-5 grid gap-4 border-t border-[#f0e2ec] pt-4 sm:grid-cols-2">
                         <div>
                           <p className="text-xs text-[#756574]">
                             Invoice Type
                           </p>
-                          <p className="mt-1 text-sm font-medium text-[#43243b]">
-                            {invoice.invoice_type || "Standard"}
-                          </p>
-                        </div>
-
-                        <div>
-                          <p className="text-xs text-[#756574]">
-                            Due Date
-                          </p>
-                          <p className="mt-1 text-sm font-medium text-[#43243b]">
-                            {formatDate(invoice.due_date)}
+                          <p className="mt-1 text-sm font-semibold text-[#43243b]">
+                            {invoice.invoice_type || "Order Invoice"}
                           </p>
                         </div>
 
@@ -1850,8 +1219,17 @@ export default function AccountPage() {
                           <p className="text-xs text-[#756574]">
                             Related Order
                           </p>
-                          <p className="mt-1 text-sm font-medium text-[#43243b]">
+                          <p className="mt-1 text-sm font-semibold text-[#43243b]">
                             {orderNumberFor(invoice.order_id)}
+                          </p>
+                        </div>
+
+                        <div>
+                          <p className="text-xs text-[#756574]">
+                            Due Date
+                          </p>
+                          <p className="mt-1 text-sm font-semibold text-[#43243b]">
+                            {formatDate(invoice.due_date)}
                           </p>
                         </div>
 
@@ -1867,46 +1245,44 @@ export default function AccountPage() {
 
                       <button
                         onClick={printDocument}
-                        className="mt-4 rounded-lg border border-[#eadce6] px-4 py-2 text-sm font-semibold text-[#75436d] hover:bg-[#f9edf5]"
+                        className="mt-5 rounded-xl border border-[#75436d] px-5 py-2.5 text-sm font-semibold text-[#75436d] hover:bg-[#f9edf5]"
                       >
-                        Print Invoice
+                        Print / Save Invoice
                       </button>
-                    </div>
+                    </article>
                   ))
                 )}
               </div>
             )}
 
-            {/* RECEIPTS */}
             {view === "receipts" && (
               <div className="space-y-5">
                 <div>
                   <h2 className="text-xl font-bold text-[#43243b]">
-                    My Receipts
+                    My Payment Receipts
                   </h2>
                   <p className="mt-1 text-sm text-[#756574]">
-                    View your recorded payments and download your official
-                    Oraia receipts.
+                    View receipts for payments recorded by Oraia by Dara.
                   </p>
                 </div>
 
                 {receipts.length === 0 ? (
-                  <div className="rounded-2xl border border-[#f0e2ec] bg-white p-10 text-center">
-                    <h3 className="font-bold text-[#43243b]">
+                  <div className="rounded-2xl border border-[#f0e2ec] bg-white p-8 text-center">
+                    <p className="font-semibold text-[#43243b]">
                       No receipts available
-                    </h3>
+                    </p>
                     <p className="mt-2 text-sm text-[#756574]">
-                      Your payment receipts will appear here after payments
-                      are recorded.
+                      Your payment receipts will appear here once your payments
+                      have been confirmed.
                     </p>
                   </div>
                 ) : (
                   receipts.map((receipt) => (
-                    <div
+                    <article
                       key={receipt.id}
                       className="rounded-2xl border border-[#f0e2ec] bg-white p-5 shadow-sm"
                     >
-                      <div className="flex flex-wrap items-start justify-between gap-4">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
                         <div>
                           <p className="text-xs text-[#756574]">
                             Receipt Number
@@ -1915,30 +1291,21 @@ export default function AccountPage() {
                             {receipt.receipt_number}
                           </h3>
                           <p className="mt-1 text-xs text-[#756574]">
-                            {formatDate(receipt.created_at)}
+                            Payment date: {formatDate(receipt.created_at)}
                           </p>
                         </div>
 
                         <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-semibold text-green-800">
-                          Recorded
+                          Payment Received
                         </span>
                       </div>
 
-                      <div className="mt-4 grid gap-3 border-t border-[#f0e2ec] pt-4 sm:grid-cols-2">
-                        <div>
-                          <p className="text-xs text-[#756574]">
-                            Amount Paid
-                          </p>
-                          <p className="mt-1 text-xl font-bold text-[#43243b]">
-                            {formatMoney(receipt.amount)}
-                          </p>
-                        </div>
-
+                      <div className="mt-5 grid gap-4 border-t border-[#f0e2ec] pt-4 sm:grid-cols-2">
                         <div>
                           <p className="text-xs text-[#756574]">
                             Related Order
                           </p>
-                          <p className="mt-1 text-sm font-medium text-[#43243b]">
+                          <p className="mt-1 text-sm font-semibold text-[#43243b]">
                             {orderNumberFor(receipt.order_id)}
                           </p>
                         </div>
@@ -1947,7 +1314,7 @@ export default function AccountPage() {
                           <p className="text-xs text-[#756574]">
                             Payment Method
                           </p>
-                          <p className="mt-1 text-sm font-medium text-[#43243b]">
+                          <p className="mt-1 text-sm font-semibold text-[#43243b]">
                             {receipt.payment_method || "Not specified"}
                           </p>
                         </div>
@@ -1956,33 +1323,34 @@ export default function AccountPage() {
                           <p className="text-xs text-[#756574]">
                             Payment Reference
                           </p>
-                          <p className="mt-1 break-all text-sm font-medium text-[#43243b]">
-                            {receipt.payment_reference || "Not available"}
+                          <p className="mt-1 break-all text-sm font-semibold text-[#43243b]">
+                            {receipt.payment_reference || "Not provided"}
+                          </p>
+                        </div>
+
+                        <div>
+                          <p className="text-xs text-[#756574]">
+                            Amount Paid
+                          </p>
+                          <p className="mt-1 text-lg font-bold text-[#43243b]">
+                            {formatMoney(receipt.amount)}
                           </p>
                         </div>
                       </div>
 
                       {receipt.notes && (
-                        <p className="mt-3 text-sm text-[#756574]">
+                        <p className="mt-4 rounded-xl bg-[#fff8fc] p-3 text-sm text-[#493a49]">
                           {receipt.notes}
                         </p>
                       )}
 
                       <button
-                        onClick={() =>
-                          downloadReceipt(
-                            receipt.id,
-                            receipt.receipt_number
-                          )
-                        }
-                        disabled={downloadingReceiptId !== null}
-                        className="mt-4 rounded-lg bg-[#75436d] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#603657] disabled:cursor-not-allowed disabled:opacity-60"
+                        onClick={printDocument}
+                        className="mt-5 rounded-xl border border-[#75436d] px-5 py-2.5 text-sm font-semibold text-[#75436d] hover:bg-[#f9edf5]"
                       >
-                        {downloadingReceiptId === receipt.id
-                          ? "Generating PDF..."
-                          : "Download PDF Receipt"}
+                        Print / Save Receipt
                       </button>
-                    </div>
+                    </article>
                   ))
                 )}
               </div>
@@ -1993,3 +1361,4 @@ export default function AccountPage() {
     </main>
   );
 }
+

@@ -1,42 +1,42 @@
+
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 
 export default function PaymentCallbackPage() {
-  const [status, setStatus] = useState<"loading" | "success" | "error">(
-    "loading"
-  );
-  const [message, setMessage] = useState(
-    "Please wait while we confirm your payment."
-  );
+  const router = useRouter();
+  const [message, setMessage] = useState("Verifying your payment...");
+  const [error, setError] = useState(false);
 
   useEffect(() => {
+    let active = true;
+
     async function verifyPayment() {
-      const params = new URLSearchParams(window.location.search);
-      const reference = params.get("reference");
-      const paymentType = params.get("payment_type");
-
-      if (!reference) {
-        setStatus("error");
-        setMessage("We could not find your payment reference.");
-        return;
-      }
-
-      const isShippingPayment = paymentType === "shipping";
-
       try {
-        const response = await fetch(
-          isShippingPayment
-            ? "/api/paystack/shipping/verify"
-            : "/api/paystack/verify",
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ reference }),
-          }
-        );
+        const params = new URLSearchParams(window.location.search);
+
+        const reference = params.get("reference");
+        const paymentType = params.get("payment_type");
+        const orderType = params.get("order_type");
+
+        if (!reference) {
+          throw new Error("Payment reference was not found.");
+        }
+
+        const isShippingPayment = paymentType === "shipping";
+
+        const endpoint = isShippingPayment
+          ? "/api/paystack/shipping/verify"
+          : "/api/paystack/verify";
+
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ reference }),
+        });
 
         const result = await response.json();
 
@@ -46,81 +46,69 @@ export default function PaymentCallbackPage() {
           );
         }
 
-        setStatus("success");
+        if (!active) return;
 
+        const verifiedOrderType = result.orderType || orderType;
+
+        if (!isShippingPayment && verifiedOrderType === "dropshipper") {
+          localStorage.removeItem("oraia_dropshipper_cart");
+          localStorage.removeItem("oraia_dropshipper_wishlist");
+
+          setMessage("Payment successful! Redirecting to your orders...");
+
+          router.replace("/dropshipper/orders");
+          return;
+        }
+
+        setMessage("Payment successful! Redirecting...");
+
+        if (isShippingPayment) {
+          router.replace("/account#orders");
+        } else {
+          router.replace("/account#orders");
+        }
+      } catch (err) {
+        if (!active) return;
+
+        setError(true);
         setMessage(
-          isShippingPayment
-            ? "Your shipping fee payment has been confirmed successfully. Thank you for shopping with Oraia by Dara."
-            : "Your payment has been confirmed successfully. Thank you for shopping with Oraia by Dara."
-        );
-      } catch (error) {
-        setStatus("error");
-        setMessage(
-          error instanceof Error
-            ? error.message
-            : "Payment verification failed. Please contact our support team."
+          err instanceof Error
+            ? err.message
+            : "Something went wrong while verifying your payment."
         );
       }
     }
 
     verifyPayment();
-  }, []);
+
+    return () => {
+      active = false;
+    };
+  }, [router]);
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-gradient-to-br from-[#fffafd] via-[#f9eef3] to-[#efdce7] px-5 py-12">
-      <div className="w-full max-w-md rounded-3xl border border-white bg-white/90 p-8 text-center shadow-[0_20px_50px_rgba(64,37,63,0.14)]">
-        <h1 className="text-2xl font-bold tracking-widest text-[#40253f]">
-          ORAIA BY DARA
+    <main className="min-h-screen flex items-center justify-center bg-[#fff9fc] px-5">
+      <div className="w-full max-w-md rounded-2xl bg-white p-8 text-center shadow-lg">
+        {!error ? (
+          <div className="mx-auto mb-5 h-12 w-12 animate-spin rounded-full border-4 border-pink-200 border-t-[#40253f]" />
+        ) : (
+          <div className="mx-auto mb-5 flex h-12 w-12 items-center justify-center rounded-full bg-red-100 text-2xl text-red-600">
+            !
+          </div>
+        )}
+
+        <h1 className="mb-3 text-xl font-semibold text-[#40253f]">
+          {error ? "Payment Verification" : "Please wait"}
         </h1>
 
-        {status === "loading" && (
-          <>
-            <div className="mx-auto mt-10 h-12 w-12 animate-spin rounded-full border-4 border-pink-100 border-t-[#40253f]" />
-            <h2 className="mt-6 text-xl font-semibold text-[#40253f]">
-              Verifying Payment
-            </h2>
-          </>
-        )}
+        <p className="text-sm text-gray-600">{message}</p>
 
-        {status === "success" && (
-          <>
-            <div className="mx-auto mt-10 flex h-16 w-16 items-center justify-center rounded-full bg-green-50 text-3xl text-green-600">
-              ✓
-            </div>
-            <h2 className="mt-6 text-xl font-semibold text-[#40253f]">
-              Payment Successful!
-            </h2>
-          </>
-        )}
-
-        {status === "error" && (
-          <>
-            <div className="mx-auto mt-10 flex h-16 w-16 items-center justify-center rounded-full bg-red-50 text-3xl text-red-500">
-              !
-            </div>
-            <h2 className="mt-6 text-xl font-semibold text-[#40253f]">
-              Payment Not Confirmed
-            </h2>
-          </>
-        )}
-
-        <p className="mt-4 text-sm leading-7 text-gray-600">{message}</p>
-
-        {status !== "loading" && (
-          <a
-            href="/account#orders"
-            className="mt-8 inline-block w-full rounded-full bg-gradient-to-br from-[#51324f] to-[#40253f] px-6 py-4 text-sm font-semibold text-white shadow-md transition hover:-translate-y-1 hover:shadow-lg"
-          >
-            Go to My Orders
-          </a>
-        )}
-
-        {status === "error" && (
+        {error && (
           <a
             href="https://wa.me/2349043423379"
             target="_blank"
-            rel="noreferrer"
-            className="mt-4 inline-block text-sm font-medium text-[#40253f] underline underline-offset-4"
+            rel="noopener noreferrer"
+            className="mt-6 inline-block rounded-lg bg-[#40253f] px-6 py-3 text-sm font-medium text-white"
           >
             Contact Support
           </a>

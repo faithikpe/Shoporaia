@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useEffect, useState } from "react";
@@ -49,6 +50,8 @@ type PromoCode = {
 };
 
 const categories = [
+  "Women",
+  "Men",
   "Fashion",
   "Shoes",
   "Bags",
@@ -94,6 +97,16 @@ function calculatePromoDiscount(
       : Math.min(Number(promo.discount_value), subtotal);
 
   return Math.round(discount * 100) / 100;
+}
+
+function isMenCategory(category: string) {
+  return /(^|\b)(men|mens|men's|male|menswear)(\b|$)/i.test(category);
+}
+
+function isWomenCategory(category: string) {
+  return /(^|\b)(women|womens|women's|female|womenswear)(\b|$)/i.test(
+    category
+  );
 }
 
 function ProductCard({
@@ -217,7 +230,6 @@ export default function Home() {
 
   const [showMenu, setShowMenu] = useState(false);
   const [announcementIndex, setAnnouncementIndex] = useState(0);
-  const [announcementVisible, setAnnouncementVisible] = useState(true);
 
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
@@ -235,25 +247,18 @@ export default function Home() {
   const [submittedOrderNumber, setSubmittedOrderNumber] = useState("");
   const [submittedWhatsAppUrl, setSubmittedWhatsAppUrl] = useState("");
 
+  // Continuously rotate the announcement banner.
   useEffect(() => {
     const interval = setInterval(() => {
-      setAnnouncementIndex(
-        (previous) => (previous + 1) % announcements.length
-      );
+      const totalMessages = products.length > 0 ? 4 : announcements.length;
+
+      setAnnouncementIndex((previous) => (previous + 1) % totalMessages);
     }, 4000);
 
-    const hideAnnouncement = setTimeout(() => {
-      setAnnouncementVisible(false);
-    }, 6500);
-
-    return () => {
-      clearInterval(interval);
-      clearTimeout(hideAnnouncement);
-    };
-  }, []);
+    return () => clearInterval(interval);
+  }, [products.length]);
 
   // Keep the homepage locked while either panel is open.
-  // The cart and wishlist retain independent scroll areas.
   useEffect(() => {
     if (!showCart && !showWishlist) return;
 
@@ -457,7 +462,6 @@ export default function Home() {
     0
   );
 
-  // Product discounts are applied before promo codes.
   const cartTotal = cartProducts.reduce(
     (total, item) => total + discountedPrice(item) * item.quantity,
     0
@@ -716,8 +720,6 @@ export default function Home() {
 
       if (itemsError) throw itemsError;
 
-      // Promo usage is not redeemed here. It must only be counted after
-      // Paystack has confirmed that the order has been paid.
       const { data: sessionData, error: sessionError } =
         await supabase.auth.getSession();
 
@@ -773,6 +775,16 @@ export default function Home() {
     .filter((product) => product.isNew)
     .slice(0, 4);
 
+  const bannerMessages =
+    products.length > 0
+      ? [
+          announcements[0],
+          `JUST ARRIVED: ${products[0].name.toUpperCase()}. EXPLORE NOW.`,
+          announcements[1],
+          announcements[2],
+        ]
+      : announcements;
+
   const inStockProducts = products.filter(
     (product) => product.stock
   );
@@ -781,13 +793,26 @@ export default function Home() {
     (product) => !product.stock
   );
 
+  const menProducts = products.filter((product) =>
+    isMenCategory(product.category)
+  );
+
   const filteredProducts = products.filter((product) => {
+    const searchTerm = search.toLowerCase().trim();
+
     const matchesSearch =
-      product.name.toLowerCase().includes(search.toLowerCase()) ||
-      product.category.toLowerCase().includes(search.toLowerCase());
+      !searchTerm ||
+      product.name.toLowerCase().includes(searchTerm) ||
+      product.category.toLowerCase().includes(searchTerm) ||
+      product.origin.toLowerCase().includes(searchTerm);
 
     const matchesCategory =
-      category === "All" || product.category === category;
+      category === "All" ||
+      (category === "Men"
+        ? isMenCategory(product.category)
+        : category === "Women"
+          ? isWomenCategory(product.category)
+          : product.category.toLowerCase() === category.toLowerCase());
 
     return matchesSearch && matchesCategory;
   });
@@ -815,30 +840,34 @@ export default function Home() {
     setAccountDropdown(false);
   }
 
+  function selectCategory(value: string) {
+    setCategory(value);
+    setShowMenu(false);
+
+    setTimeout(() => {
+      document.getElementById("catalogue")?.scrollIntoView({
+        behavior: "smooth",
+      });
+    }, 50);
+  }
+
   return (
     <main className="min-h-screen overflow-x-hidden bg-white text-[#302033]">
       {/* ROTATING ANNOUNCEMENT BAR */}
-      <div
-        aria-hidden={!announcementVisible}
-        className={`relative flex items-center justify-center overflow-hidden bg-gradient-to-r from-[#40253f] via-[#593653] to-[#40253f] px-10 text-center text-[10px] font-medium tracking-[0.16em] text-white shadow-[0_4px_14px_rgba(64,37,63,0.18)] transition-all duration-700 ease-in-out sm:text-xs ${
-          announcementVisible
-            ? "max-h-12 min-h-10 py-3 opacity-100"
-            : "max-h-0 min-h-0 -translate-y-full py-0 opacity-0"
-        }`}
-      >
+      <div className="relative flex min-h-10 items-center justify-center overflow-hidden bg-gradient-to-r from-[#40253f] via-[#593653] to-[#40253f] px-10 py-3 text-center text-[10px] font-medium tracking-[0.16em] text-white shadow-[0_4px_14px_rgba(64,37,63,0.18)] sm:text-xs">
         <span
           key={announcementIndex}
           className="animate-[fadeIn_0.6s_ease-in-out]"
         >
-          {announcements[announcementIndex]}
+          {bannerMessages[announcementIndex % bannerMessages.length]}
         </span>
 
         <div className="absolute bottom-1 left-0 right-0 flex justify-center gap-1">
-          {announcements.map((_, index) => (
+          {bannerMessages.map((_, index) => (
             <span
               key={index}
               className={`h-1 rounded-full transition-all ${
-                announcementIndex === index
+                announcementIndex % bannerMessages.length === index
                   ? "w-4 bg-white"
                   : "w-1 bg-white/40"
               }`}
@@ -958,6 +987,27 @@ export default function Home() {
               </div>
             )}
 
+            {/* WISHLIST */}
+            <button
+              type="button"
+              onClick={() => {
+                setShowCart(false);
+                setShowWishlist(true);
+                closeMenu();
+              }}
+              aria-label="Open wishlist"
+              title="Wishlist"
+              className="relative flex h-10 w-10 items-center justify-center rounded-full border border-pink-100 bg-white text-xl text-[#40253f] shadow-[0_3px_9px_rgba(64,37,63,0.08)] transition-all hover:-translate-y-0.5 hover:bg-[#f9eef3] hover:shadow-md"
+            >
+              {wishlist.length > 0 ? "♥" : "♡"}
+
+              {wishlist.length > 0 && (
+                <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#40253f] px-1 text-[9px] font-semibold text-white">
+                  {wishlist.length}
+                </span>
+              )}
+            </button>
+
             {/* SHOPPING BAG */}
             <button
               type="button"
@@ -1009,6 +1059,51 @@ export default function Home() {
           </div>
         </div>
 
+        {/* HOMEPAGE SEARCH AND QUICK NAVIGATION */}
+        <div className="border-t border-pink-50 bg-white px-4 py-3 sm:px-6">
+          <div className="mx-auto max-w-7xl">
+            <div className="relative">
+              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-lg text-[#b47c9c]">
+                ⌕
+              </span>
+
+              <input
+                type="search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    document.getElementById("catalogue")?.scrollIntoView({
+                      behavior: "smooth",
+                    });
+                  }
+                }}
+                placeholder="Search for products, fashion, bags, beauty..."
+                aria-label="Search products"
+                className="w-full rounded-full border border-pink-100 bg-[#fcf7fa] py-3 pl-11 pr-5 text-sm text-[#302033] outline-none transition focus:border-[#40253f] focus:bg-white"
+              />
+            </div>
+
+            <nav className="mt-3 flex items-center justify-center gap-6 overflow-x-auto whitespace-nowrap text-xs font-medium text-[#40253f] sm:gap-10">
+              {[
+                ["Women", "Women"],
+                ["Men", "Men"],
+                ["Beauty", "Beauty & Skincare"],
+                ["Accessories", "Accessories"],
+              ].map(([label, value]) => (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() => selectCategory(value)}
+                  className="shrink-0 border-b-2 border-transparent pb-2 transition hover:border-[#b47c9c] hover:text-[#b47c9c]"
+                >
+                  {label}
+                </button>
+              ))}
+            </nav>
+          </div>
+        </div>
+
         {/* EXPANDABLE NAVIGATION MENU */}
         {showMenu && (
           <div className="absolute left-0 right-0 top-full z-50 border-t border-pink-100 bg-white shadow-[0_20px_35px_rgba(64,37,63,0.16)]">
@@ -1022,9 +1117,11 @@ export default function Home() {
                   <nav className="space-y-1">
                     {[
                       ["Home", "#home"],
+                      ["Shop by Category", "#categories"],
                       ["New Arrivals", "#new-arrivals"],
                       ["In-Stock Collection", "#in-stock"],
                       ["China Preorder", "#china-preorder"],
+                      ["Men's Collection", "#men-collection"],
                       ["Shop All Products", "#catalogue"],
                     ].map(([label, link]) => (
                       <a
@@ -1169,7 +1266,6 @@ export default function Home() {
               </button>
             </div>
 
-            {/* Independent shopping bag scroll area */}
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-6">
               {cartProducts.length === 0 && !orderSubmitted ? (
                 <div className="py-16 text-center">
@@ -1336,7 +1432,6 @@ export default function Home() {
               </div>
             ) : cartProducts.length > 0 ? (
               <div className="max-h-[60%] shrink-0 overflow-y-auto overscroll-contain border-t border-pink-100 p-6">
-                {/* ORDER TOTALS */}
                 <div className="space-y-3">
                   {productSavings > 0 && (
                     <>
@@ -1613,7 +1708,6 @@ export default function Home() {
               </button>
             </div>
 
-            {/* Independent wishlist scroll area */}
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-6">
               {wishlistProducts.length === 0 ? (
                 <div className="py-16 text-center">
@@ -1704,7 +1798,7 @@ export default function Home() {
         </div>
       )}
 
-      {/* 3D HERO */}
+      {/* HERO */}
       <section
         id="home"
         className="relative isolate overflow-hidden bg-gradient-to-br from-[#fffafd] via-[#f9eef3] to-[#efdce7] px-5 py-16 md:py-24"
@@ -1790,6 +1884,42 @@ export default function Home() {
         </div>
       </section>
 
+      {/* CATEGORIES - NOW DIRECTLY BELOW HERO */}
+      <section
+        id="categories"
+        className="bg-gradient-to-br from-[#f9eef3] to-[#f0dfe9] px-5 py-16"
+      >
+        <div className="mx-auto max-w-7xl">
+          <p className="text-xs uppercase tracking-widest text-[#ad7191]">
+            Find Your Favourites
+          </p>
+
+          <h2 className="mb-3 mt-2 text-3xl font-semibold text-[#40253f]">
+            Shop by Category
+          </h2>
+
+          <p className="mb-7 max-w-xl text-sm leading-6 text-gray-600">
+            Explore our collections and discover something you'll love.
+          </p>
+
+          <div className="flex flex-wrap gap-3">
+            {["All", ...categories].map((item) => (
+              <button
+                key={item}
+                onClick={() => selectCategory(item)}
+                className={`rounded-full border px-6 py-3 text-sm shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-md ${
+                  category === item
+                    ? "border-[#40253f] bg-gradient-to-br from-[#51324f] to-[#40253f] text-white shadow-[0_6px_14px_rgba(64,37,63,0.22)]"
+                    : "border-pink-200 bg-white text-[#40253f] hover:border-[#c99db7]"
+                }`}
+              >
+                {item}
+              </button>
+            ))}
+          </div>
+        </div>
+      </section>
+
       {/* SHOPPING BENEFITS */}
       <section className="mx-auto grid max-w-7xl gap-5 px-5 py-12 sm:grid-cols-3">
         {[
@@ -1809,6 +1939,7 @@ export default function Home() {
           </div>
         ))}
       </section>
+
       {/* NEW ARRIVALS */}
       <section id="new-arrivals" className="mx-auto max-w-7xl px-5 py-16">
         <div className="mb-8">
@@ -1904,37 +2035,54 @@ export default function Home() {
         )}
       </section>
 
-      {/* CATEGORIES */}
-      <section className="bg-gradient-to-br from-[#f9eef3] to-[#f0dfe9] px-5 py-16">
+      {/* MEN'S COLLECTION */}
+      <section
+        id="men-collection"
+        className="bg-gradient-to-br from-[#fcf7fa] to-[#f4e8ef] px-5 py-16"
+      >
         <div className="mx-auto max-w-7xl">
-          <p className="text-xs uppercase tracking-widest text-[#ad7191]">
-            Find Your Favourites
-          </p>
+          <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <p className="text-xs uppercase tracking-widest text-[#b47c9c]">
+                The Men's Edit
+              </p>
 
-          <h2 className="mb-7 mt-2 text-3xl font-semibold text-[#40253f]">
-            Shop by Category
-          </h2>
+              <h2 className="mt-2 text-3xl font-semibold text-[#40253f]">
+                Shop Men
+              </h2>
 
-          <div className="flex flex-wrap gap-3">
-            {["All", ...categories].map((item) => (
-              <button
-                key={item}
-                onClick={() => {
-                  setCategory(item);
-                  document.getElementById("catalogue")?.scrollIntoView({
-                    behavior: "smooth",
-                  });
-                }}
-                className={`rounded-full border px-6 py-3 text-sm shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-md ${
-                  category === item
-                    ? "border-[#40253f] bg-gradient-to-br from-[#51324f] to-[#40253f] text-white shadow-[0_6px_14px_rgba(64,37,63,0.22)]"
-                    : "border-pink-200 bg-white text-[#40253f] hover:border-[#c99db7]"
-                }`}
-              >
-                {item}
-              </button>
-            ))}
+              <p className="mt-3 text-sm text-gray-500">
+                Explore our collection of men's fashion and essentials.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => selectCategory("Men")}
+              className="rounded-full border border-[#40253f] px-5 py-3 text-xs font-semibold text-[#40253f] transition hover:bg-[#40253f] hover:text-white"
+            >
+              Explore Men's Products
+            </button>
           </div>
+
+          {loading ? (
+            <p className="py-8 text-center text-gray-500">
+              Loading products...
+            </p>
+          ) : menProducts.length > 0 ? (
+            <div className="grid grid-cols-2 gap-5 md:grid-cols-4">
+              {menProducts.slice(0, 8).map(renderProductCard)}
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-pink-100 bg-white p-8 text-center">
+              <p className="font-medium text-[#40253f]">
+                Men's collection coming soon.
+              </p>
+              <p className="mt-2 text-sm text-gray-500">
+                New products will appear here when added to the men's category.
+              </p>
+            </div>
+          )}
         </div>
       </section>
 
@@ -1959,9 +2107,24 @@ export default function Home() {
           />
         </div>
 
-        <p className="mb-5 text-sm text-gray-500">
-          Showing: {category === "All" ? "All categories" : category}
-        </p>
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-gray-500">
+            Showing: {category === "All" ? "All categories" : category}
+          </p>
+
+          {(search || category !== "All") && (
+            <button
+              type="button"
+              onClick={() => {
+                setSearch("");
+                setCategory("All");
+              }}
+              className="text-xs font-medium text-[#ad7191] underline underline-offset-4"
+            >
+              Clear filters
+            </button>
+          )}
+        </div>
 
         {loading ? (
           <p className="py-8 text-center text-gray-500">
@@ -2329,7 +2492,7 @@ export default function Home() {
             </p>
 
             <a
-              href="https://wa.me/2349043423379"
+              href={`https://wa.me/${WHATSAPP_NUMBER}`}
               target="_blank"
               rel="noreferrer"
               className="mt-4 inline-block rounded-full bg-white px-5 py-3 text-sm font-medium text-[#40253f] shadow-md transition hover:-translate-y-1 hover:shadow-lg"

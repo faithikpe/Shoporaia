@@ -13,33 +13,70 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const secretKey = process.env.PAYSTACK_SECRET_KEY;
 
-    const secretKey = process.env.PAYSTACK_SECRET_KEY!;
-
-    if (!secretKey) {
-      throw new Error("Paystack configuration is missing.");
+    if (!supabaseUrl || !serviceKey || !secretKey) {
+      throw new Error("Payment configuration is missing.");
     }
 
-    const { data: order, error: orderError } = await supabase
+    const supabase = createClient(supabaseUrl, serviceKey, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+      },
+    });
+
+    let orderType: "customer" | "dropshipper" = "customer";
+
+    let { data: order, error: orderError } = await supabase
       .from("customer_orders")
       .select(
         "id, user_id, order_number, total_amount, currency, payment_status, payment_reference, customer_name, customer_email"
       )
       .eq("payment_reference", reference)
-      .single();
+      .maybeSingle();
 
-    if (orderError || !order) {
+    if (orderError) {
+      throw new Error("Unable to find the payment order.");
+    }
+
+    if (!order) {
+      const dropshipperResult = await supabase
+        .from("dropshipper_orders")
+        .select(
+          "id, user_id, order_number, total_amount, currency, payment_status, payment_reference, customer_name, customer_email"
+        )
+        .eq("payment_reference", reference)
+        .maybeSingle();
+
+      if (dropshipperResult.error) {
+        throw new Error("Unable to find the payment order.");
+      }
+
+      order = dropshipperResult.data;
+      orderType = "dropshipper";
+    }
+
+    if (!order) {
       return NextResponse.json(
         { error: "No order was found for this payment." },
         { status: 404 }
       );
     }
 
-    // Verify the transaction with Paystack, including already-paid orders.
+    const ordersTable =
+      orderType === "dropshipper"
+        ? "dropshipper_orders"
+        : "customer_orders";
+
+    const receiptsTable =
+      orderType === "dropshipper"
+        ? "dropshipper_receipts"
+        : "customer_receipts";
+
+    // Verify the transaction directly with Paystack.
     const response = await fetch(
       `https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`,
       {
@@ -66,7 +103,7 @@ export async function POST(request: NextRequest) {
     if (
       transaction.status !== "success" ||
       transaction.reference !== reference ||
-      transaction.amount !== expectedAmount ||
+      Number(transaction.amount) !== expectedAmount ||
       transaction.currency !== order.currency
     ) {
       return NextResponse.json(
@@ -75,7 +112,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Confirm that this Paystack transaction belongs to this order.
+    // Confirm that the transaction belongs to this order.
     const metadata = transaction.metadata || {};
 
     if (
@@ -88,42 +125,76 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Update the order only if it has not already been marked as paid.
-    if (order.payment_status !== "PAID") {
+    if (
+      metadata.order_type &&
+      metadata.order_type !== orderType
+    ) {
+      return NextResponse.json(
+        { error: "Payment order type does not match." },
+        { status: 400 }
+      );
+    }
+
+    // Confirm dropshipper account type.
+    if (orderType === "dropshipper") {
+      const { data: profile, error: profileError } = await supabase
+        .from("customer_profiles")
+        .select("account_type")
+        .eq("user_id", order.user_id)
+        .maybeSingle();
+
+      if (profileError || profile?.account_type !== "dropshipper") {
+        return NextResponse.json(
+          { error: "This order does not belong to a valid dropshipper." },
+          { status: 403 }
+        );
+      }
+    }
+
+    // Update the order only if it has not already been paid.
+    const currentPaymentStatus = String(
+      order.payment_status || ""
+    ).toUpperCase();
+
+    if (!["PAID", "SUCCESS"].includes(currentPaymentStatus)) {
       const { error: updateError } = await supabase
-        .from("customer_orders")
+        .from(ordersTable)
         .update({
           payment_status: "PAID",
           paid_at: new Date().toISOString(),
         })
         .eq("id", order.id)
         .eq("payment_reference", reference)
-        .in("payment_status", ["UNPAID", "PENDING", "FAILED"])
-        .select("id")
-        .maybeSingle();
+        .in("payment_status", ["UNPAID", "PENDING", "FAILED"]);
 
       if (updateError) {
         throw new Error(
           "Payment was confirmed, but the order could not be updated."
         );
       }
-
-      // Check the latest status in case another request updated it.
-      const { data: latestOrder, error: latestError } = await supabase
-        .from("customer_orders")
-        .select("payment_status")
-        .eq("id", order.id)
-        .single();
-
-      if (latestError || latestOrder?.payment_status !== "PAID") {
-        throw new Error("Unable to update the order payment status.");
-      }
     }
 
-    // Check whether a receipt already exists for this payment.
+    // Confirm that the order is now marked as paid.
+    const { data: latestOrder, error: latestError } = await supabase
+      .from(ordersTable)
+      .select("payment_status")
+      .eq("id", order.id)
+      .eq("payment_reference", reference)
+      .maybeSingle();
+
+    if (
+      latestError ||
+      !["PAID", "SUCCESS"].includes(
+        String(latestOrder?.payment_status || "").toUpperCase()
+      )
+    ) {
+      throw new Error("Unable to confirm the order payment status.");
+    }
+
+    // Check whether a receipt already exists.
     const { data: existingReceipt, error: receiptCheckError } =
       await supabase
-        .from("customer_receipts")
+        .from(receiptsTable)
         .select("id, receipt_number")
         .eq("payment_reference", reference)
         .maybeSingle();
@@ -134,6 +205,7 @@ export async function POST(request: NextRequest) {
 
     let receipt = existingReceipt;
 
+    // Create a receipt only when one does not already exist.
     if (!receipt) {
       const receiptNumber = `ORA-${Date.now()}-${Math.floor(
         1000 + Math.random() * 9000
@@ -141,7 +213,7 @@ export async function POST(request: NextRequest) {
 
       const { data: newReceipt, error: receiptInsertError } =
         await supabase
-          .from("customer_receipts")
+          .from(receiptsTable)
           .insert({
             user_id: order.user_id,
             order_id: order.id,
@@ -149,25 +221,40 @@ export async function POST(request: NextRequest) {
             amount: Number(order.total_amount),
             payment_method: "Paystack",
             payment_reference: reference,
-            notes: `Payment for order ${order.order_number}`,
+            notes: `Payment for ${orderType} order ${order.order_number}`,
           })
           .select("id, receipt_number")
           .single();
 
       if (receiptInsertError || !newReceipt) {
-        throw new Error(
-          "Payment is confirmed, but receipt creation failed. Please contact support."
-        );
-      }
+        // A simultaneous verification may have created the receipt.
+        const { data: duplicateReceipt, error: duplicateError } =
+          await supabase
+            .from(receiptsTable)
+            .select("id, receipt_number")
+            .eq("payment_reference", reference)
+            .maybeSingle();
 
-      receipt = newReceipt;
+        if (duplicateError || !duplicateReceipt) {
+          throw new Error(
+            "Payment is confirmed, but receipt creation failed. Please contact support."
+          );
+        }
+
+        receipt = duplicateReceipt;
+      } else {
+        receipt = newReceipt;
+      }
     }
 
     return NextResponse.json({
       success: true,
       receiptNumber: receipt.receipt_number,
+      orderType,
     });
   } catch (error) {
+    console.error("Paystack verification error:", error);
+
     return NextResponse.json(
       {
         error:

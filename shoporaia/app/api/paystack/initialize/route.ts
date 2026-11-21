@@ -6,7 +6,7 @@ import crypto from "crypto";
 export async function POST(request: NextRequest) {
   try {
     const authorization = request.headers.get("authorization");
-    const token = authorization?.replace("Bearer ", "");
+    const token = authorization?.replace(/^Bearer\s+/i, "");
 
     if (!token) {
       return NextResponse.json(
@@ -47,22 +47,47 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json();
     const orderId = body.orderId;
+    const orderType = body.orderType || "customer";
 
-    if (!orderId || typeof orderId !== "string") {
+    if (
+      !orderId ||
+      typeof orderId !== "string" ||
+      !["customer", "dropshipper"].includes(orderType)
+    ) {
       return NextResponse.json(
-        { error: "Order ID is required." },
+        { error: "Invalid order information." },
         { status: 400 }
       );
     }
 
+    const table =
+      orderType === "dropshipper"
+        ? "dropshipper_orders"
+        : "customer_orders";
+
+    if (orderType === "dropshipper") {
+      const { data: profile, error: profileError } = await adminClient
+        .from("customer_profiles")
+        .select("account_type")
+        .eq("user_id", userData.user.id)
+        .maybeSingle();
+
+      if (profileError || profile?.account_type !== "dropshipper") {
+        return NextResponse.json(
+          { error: "A valid dropshipper account is required." },
+          { status: 403 }
+        );
+      }
+    }
+
     const { data: order, error: orderError } = await adminClient
-      .from("customer_orders")
+      .from(table)
       .select(
         "id, order_number, user_id, total_amount, currency, payment_status, order_status, customer_email"
       )
       .eq("id", orderId)
       .eq("user_id", userData.user.id)
-      .single();
+      .maybeSingle();
 
     if (orderError || !order) {
       return NextResponse.json(
@@ -79,7 +104,7 @@ export async function POST(request: NextRequest) {
       .trim()
       .toUpperCase();
 
-    if (paymentStatus === "PAID" || paymentStatus === "SUCCESS") {
+    if (["PAID", "SUCCESS"].includes(paymentStatus)) {
       return NextResponse.json(
         { error: "This order has already been paid." },
         { status: 400 }
@@ -124,10 +149,36 @@ export async function POST(request: NextRequest) {
 
     const reference = `ORAIA-${crypto.randomUUID()}`;
 
+    // Save the reference before creating the Paystack transaction.
+    let updateQuery = adminClient
+      .from(table)
+      .update({ payment_reference: reference })
+      .eq("id", order.id)
+      .eq("user_id", userData.user.id);
+
+    if (order.payment_status == null) {
+      updateQuery = updateQuery.is("payment_status", null);
+    } else {
+      updateQuery = updateQuery.eq(
+        "payment_status",
+        order.payment_status
+      );
+    }
+
+    const { data: updatedOrder, error: updateError } =
+      await updateQuery.select("id").maybeSingle();
+
+    if (updateError || !updatedOrder) {
+      throw new Error(
+        "Unable to prepare your order for payment. Please refresh and try again."
+      );
+    }
+
     const siteUrl =
       process.env.NEXT_PUBLIC_SITE_URL || request.nextUrl.origin;
 
-    const callbackUrl = `${siteUrl.replace(/\/$/, "")}/payment/callback`;
+    const callbackUrl =
+      `${siteUrl.replace(/\/+$/, "")}/payment/callback`;
 
     const paystackResponse = await fetch(
       "https://api.paystack.co/transaction/initialize",
@@ -147,6 +198,7 @@ export async function POST(request: NextRequest) {
             order_id: order.id,
             order_number: order.order_number,
             customer_id: userData.user.id,
+            order_type: orderType,
           },
         }),
       }
@@ -154,35 +206,13 @@ export async function POST(request: NextRequest) {
 
     const paymentData = await paystackResponse.json();
 
-    if (!paystackResponse.ok || !paymentData.status) {
+    if (
+      !paystackResponse.ok ||
+      !paymentData.status ||
+      !paymentData.data?.authorization_url
+    ) {
       throw new Error(
         paymentData.message || "Unable to initialize payment."
-      );
-    }
-
-    let updateQuery = adminClient
-      .from("customer_orders")
-      .update({
-        payment_reference: reference,
-      })
-      .eq("id", order.id)
-      .eq("user_id", userData.user.id);
-
-    if (order.payment_status == null) {
-      updateQuery = updateQuery.is("payment_status", null);
-    } else {
-      updateQuery = updateQuery.eq(
-        "payment_status",
-        order.payment_status
-      );
-    }
-
-    const { data: updatedOrder, error: updateError } =
-      await updateQuery.select("id").maybeSingle();
-
-    if (updateError || !updatedOrder) {
-      throw new Error(
-        "Unable to save payment reference. Please refresh and try again."
       );
     }
 
