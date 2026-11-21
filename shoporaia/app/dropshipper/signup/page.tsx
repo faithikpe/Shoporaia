@@ -23,10 +23,12 @@ export default function DropshipperSignupPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
+  const [success, setSuccess] = useState(false);
 
   async function handleSignup(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setMessage("");
+    setSuccess(false);
 
     if (password.length < 6) {
       setMessage("Password must be at least 6 characters.");
@@ -40,34 +42,51 @@ export default function DropshipperSignupPage() {
 
     setLoading(true);
 
-    const { error } = await supabase.auth.signUp({
-      email: email.trim().toLowerCase(),
-      password,
-      options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
-        data: {
-          full_name: fullName.trim(),
-          username: username.trim(),
-          phone: phone.trim(),
-          state: state.trim(),
-          city: city.trim(),
-          delivery_address: address.trim(),
-          country: "Nigeria",
-          account_type: "dropshipper",
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email: email.trim().toLowerCase(),
+        password,
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
+          data: {
+            full_name: fullName.trim(),
+            username: username.trim(),
+            phone: phone.trim(),
+            state: state.trim(),
+            city: city.trim(),
+            delivery_address: address.trim(),
+            country: "Nigeria",
+            account_type: "dropshipper",
+          },
         },
-      },
-    });
+      });
 
-    setLoading(false);
+      if (error) {
+        setMessage(`Registration failed: ${error.message}`);
+        return;
+      }
 
-    if (error) {
-      setMessage(error.message);
-      return;
+      if (!data.user) {
+        setMessage("Supabase did not return a user. Please try again.");
+        return;
+      }
+
+      setSuccess(true);
+
+      setMessage(
+        data.session
+          ? "Your account was created and you are signed in. Email confirmation may be disabled for this project."
+          : "Your account was created. Please check your email, including your spam folder, for the confirmation link."
+      );
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? `Unexpected error: ${error.message}`
+          : "An unexpected registration error occurred."
+      );
+    } finally {
+      setLoading(false);
     }
-
-    setMessage(
-      "Registration successful! Please check your email to confirm your account before logging in."
-    );
   }
 
   return (
@@ -223,7 +242,13 @@ export default function DropshipperSignupPage() {
           </label>
 
           {message && (
-            <div className="rounded-xl bg-pink-50 p-3 text-sm text-pink-700">
+            <div
+              className={`rounded-xl p-3 text-sm ${
+                success
+                  ? "bg-green-50 text-green-700"
+                  : "bg-pink-50 text-pink-700"
+              }`}
+            >
               {message}
             </div>
           )}
