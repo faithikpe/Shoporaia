@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -18,7 +17,6 @@ type AccountView =
   | "invoices"
   | "receipts"
   | "coupons"
-  | "points"
   | "wishlist"
   | "recently-viewed"
   | "customer-service"
@@ -455,7 +453,6 @@ export default function AccountPage() {
         "invoices",
         "receipts",
         "coupons",
-        "points",
         "wishlist",
         "recently-viewed",
         "customer-service",
@@ -772,7 +769,10 @@ export default function AccountPage() {
 
     const linkedReceipts = receipts
       .filter((receipt) => receipt.order_id === invoice.order_id)
-      .reduce((receiptSum, receipt) => receiptSum + Number(receipt.amount ?? 0), 0);
+      .reduce(
+        (receiptSum, receipt) => receiptSum + Number(receipt.amount ?? 0),
+        0
+      );
 
     return sum + Math.max(0, Number(invoice.amount ?? 0) - linkedReceipts);
   }, 0);
@@ -785,7 +785,6 @@ export default function AccountPage() {
     invoices: "My Invoices",
     receipts: "My Receipts",
     coupons: "My Coupons",
-    points: "My Points",
     wishlist: "My Wishlist",
     "recently-viewed": "Recently Viewed",
     "customer-service": "Customer Service",
@@ -921,7 +920,6 @@ export default function AccountPage() {
                   {navButton("wishlist", "Wishlist", "♡")}
                   {navButton("recently-viewed", "Recently Viewed", "◷")}
                   {navButton("coupons", "My Coupons", "％")}
-                  {navButton("points", "My Points", "✧")}
                 </div>
               </div>
             </div>
@@ -953,11 +951,6 @@ export default function AccountPage() {
                       label: "My Coupons",
                       value: "—",
                       icon: "%",
-                    },
-                    {
-                      label: "My Points",
-                      value: "—",
-                      icon: "✧",
                     },
                     {
                       label: "Saved Addresses",
@@ -1095,15 +1088,15 @@ export default function AccountPage() {
 
                   <button
                     type="button"
-                    onClick={() => navigate("points")}
+                    onClick={() => navigate("wishlist")}
                     className="rounded-2xl border border-[#f0e2ec] bg-white p-5 text-left transition hover:border-[#d9b9d0]"
                   >
-                    <span className="text-2xl text-[#75436d]">✧</span>
+                    <span className="text-2xl text-[#75436d]">♡</span>
                     <h3 className="mt-3 font-semibold text-[#43243b]">
-                      My Points
+                      My Wishlist
                     </h3>
                     <p className="mt-1 text-sm text-gray-500">
-                      View your rewards information.
+                      View products you have saved.
                     </p>
                   </button>
                 </div>
@@ -1882,43 +1875,6 @@ export default function AccountPage() {
                 <EmptyState
                   title="No coupons available"
                   description="You don't have any coupons displayed in your account yet. When coupon rewards are activated and assigned to your account, they will appear here."
-                />
-              </div>
-            )}
-
-            {/* POINTS */}
-            {view === "points" && (
-              <div className="space-y-5">
-                <div className="rounded-2xl border border-[#f0e2ec] bg-white p-6">
-                  <div className="flex items-center gap-4">
-                    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[#fff1f8] text-2xl text-[#75436d]">
-                      ✧
-                    </div>
-                    <div>
-                      <h3 className="font-semibold text-[#43243b]">
-                        My Points
-                      </h3>
-                      <p className="mt-1 text-sm text-gray-500">
-                        Your Oraia rewards information.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="mt-6 rounded-xl bg-[#fff8fc] p-5">
-                    <p className="text-sm text-gray-500">Rewards balance</p>
-                    <p className="mt-1 text-3xl font-semibold text-[#43243b]">
-                      Not active
-                    </p>
-                    <p className="mt-2 text-xs leading-5 text-gray-500">
-                      A points balance will be displayed here once the Oraia
-                      rewards programme is connected to your account.
-                    </p>
-                  </div>
-                </div>
-
-                <EmptyState
-                  title="Rewards are not active yet"
-                  description="Your points history and reward redemptions will appear here when the rewards programme is launched."
                 />
               </div>
             )}
