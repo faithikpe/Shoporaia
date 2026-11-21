@@ -107,6 +107,7 @@ type OrderLine = {
 
 type Tab =
   | "products"
+  | "dropshipper"
   | "discounts"
   | "orders"
   | "invoices"
@@ -164,18 +165,8 @@ function money(amount: number, currency = "NGN") {
   return `${currency} ${value.toLocaleString()}`;
 }
 
-function discountedPrice(product: Product) {
-  const discount = Math.min(
-    100,
-    Math.max(0, Number(product.discount_percent || 0))
-  );
-
-  return Number(product.price) * (1 - discount / 100);
-}
-
 function dateText(date: string | null | undefined) {
   if (!date) return "Not set";
-
   return new Date(date).toLocaleDateString("en-NG", {
     day: "numeric",
     month: "short",
@@ -185,7 +176,6 @@ function dateText(date: string | null | undefined) {
 
 function dateTimeText(date: string | null | undefined) {
   if (!date) return "Not set";
-
   return new Date(date).toLocaleString("en-NG", {
     day: "numeric",
     month: "short",
@@ -195,13 +185,12 @@ function dateTimeText(date: string | null | undefined) {
   });
 }
 
-function toLocalDateTime(value: string | null) {
-  if (!value) return "";
-
-  const date = new Date(value);
-  const offset = date.getTimezoneOffset() * 60000;
-
-  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+function discountedPrice(product: Product) {
+  const discount = Math.min(
+    100,
+    Math.max(0, Number(product.discount_percent || 0))
+  );
+  return Number(product.price) * (1 - discount / 100);
 }
 
 function makeReference(prefix: string) {
@@ -216,21 +205,18 @@ function statusClass(status: string | null | undefined) {
     value.includes("delivered") ||
     value.includes("completed") ||
     value.includes("confirmed")
-  ) {
+  )
     return "bg-green-100 text-green-800";
-  }
 
   if (
     value.includes("pending") ||
     value.includes("processing") ||
     value.includes("transit")
-  ) {
+  )
     return "bg-amber-100 text-amber-800";
-  }
 
-  if (value.includes("cancelled") || value.includes("failed")) {
+  if (value.includes("cancelled") || value.includes("failed"))
     return "bg-red-100 text-red-800";
-  }
 
   return "bg-gray-100 text-gray-700";
 }
@@ -242,6 +228,7 @@ export default function AdminPage() {
   const [checking, setChecking] = useState(true);
 
   const [products, setProducts] = useState<Product[]>([]);
+  const [dropshipperProducts, setDropshipperProducts] = useState<Product[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
@@ -250,9 +237,16 @@ export default function AdminPage() {
   const [promoCodes, setPromoCodes] = useState<PromoCode[]>([]);
 
   const [tab, setTab] = useState<Tab>("products");
+
   const [form, setForm] = useState(emptyForm);
   const [image, setImage] = useState<File | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+
+  const [dropshipperForm, setDropshipperForm] = useState(emptyForm);
+  const [dropshipperImage, setDropshipperImage] = useState<File | null>(null);
+  const [editingDropshipperId, setEditingDropshipperId] = useState<
+    string | null
+  >(null);
 
   const [promoForm, setPromoForm] = useState(emptyPromoForm);
   const [editingPromoId, setEditingPromoId] = useState<string | null>(null);
@@ -312,9 +306,7 @@ export default function AdminPage() {
     if (error || !data) {
       await supabase.auth.signOut();
       setLoggedIn(false);
-      setMessage(
-        "This account is not authorized to access the admin dashboard."
-      );
+      setMessage("This account is not authorized to access the admin dashboard.");
       setChecking(false);
       return;
     }
@@ -348,6 +340,7 @@ export default function AdminPage() {
     await supabase.auth.signOut();
     setLoggedIn(false);
     setProducts([]);
+    setDropshipperProducts([]);
     setOrders([]);
     setCustomers([]);
     setOrderItems([]);
@@ -360,12 +353,37 @@ export default function AdminPage() {
   async function loadAll() {
     await Promise.all([
       loadProducts(),
+      loadDropshipperProducts(),
       loadCustomers(),
       loadOrders(),
       loadInvoices(),
       loadReceipts(),
       loadPromoCodes(),
     ]);
+  }
+
+  async function loadProductImages(rows: any[]): Promise<Product[]> {
+    return Promise.all(
+      (rows || []).map(async (product) => {
+        let imageUrl = "";
+
+        if (product.image_path) {
+          const { data } = await supabase.storage
+            .from("product-images")
+            .createSignedUrl(product.image_path, 3600);
+
+          imageUrl = data?.signedUrl || "";
+        }
+
+        return {
+          ...product,
+          price: Number(product.price || 0),
+          discount_percent: Number(product.discount_percent || 0),
+          quantity: Number(product.quantity || 0),
+          imageUrl,
+        } as Product;
+      })
+    );
   }
 
   async function loadProducts() {
@@ -379,27 +397,21 @@ export default function AdminPage() {
       return;
     }
 
-    const items = await Promise.all(
-      (data || []).map(async (product) => {
-        let imageUrl = "";
+    setProducts(await loadProductImages(data || []));
+  }
 
-        if (product.image_path) {
-          const { data: signedImage } = await supabase.storage
-            .from("product-images")
-            .createSignedUrl(product.image_path, 3600);
+  async function loadDropshipperProducts() {
+    const { data, error } = await supabase
+      .from("dropshipper_products")
+      .select("*")
+      .order("created_at", { ascending: false });
 
-          imageUrl = signedImage?.signedUrl || "";
-        }
+    if (error) {
+      setMessage("Could not load dropshipper products: " + error.message);
+      return;
+    }
 
-        return {
-          ...product,
-          discount_percent: Number(product.discount_percent || 0),
-          imageUrl,
-        };
-      })
-    );
-
-    setProducts(items as Product[]);
+    setDropshipperProducts(await loadProductImages(data || []));
   }
 
   async function loadPromoCodes() {
@@ -444,14 +456,11 @@ export default function AdminPage() {
     const loadedOrders = (data || []) as Order[];
     setOrders(loadedOrders);
 
-    if (loadedOrders.length > 0) {
+    if (loadedOrders.length) {
       const { data: items, error: itemError } = await supabase
         .from("order_items")
         .select("*")
-        .in(
-          "order_id",
-          loadedOrders.map((order) => order.id)
-        );
+        .in("order_id", loadedOrders.map((order) => order.id));
 
       if (itemError) {
         setMessage("Could not load order items: " + itemError.message);
@@ -491,7 +500,7 @@ export default function AdminPage() {
     setReceipts((data || []) as Receipt[]);
   }
 
-  function resetForm() {
+  function resetProductForm() {
     setForm(emptyForm);
     setImage(null);
     setEditingId(null);
@@ -503,64 +512,61 @@ export default function AdminPage() {
     if (fileInput) fileInput.value = "";
   }
 
-  function startEditing(product: Product) {
-    setEditingId(product.id);
-    setForm({
-      name: product.name,
-      description: product.description || "",
-      price: String(product.price),
-      discount_percent: String(product.discount_percent || 0),
-      category: product.category,
-      origin: product.origin,
-      quantity: String(product.quantity),
-    });
-    setImage(null);
-    setMessage("");
-    setTab("products");
-    window.scrollTo({ top: 0, behavior: "smooth" });
+  function resetDropshipperForm() {
+    setDropshipperForm(emptyForm);
+    setDropshipperImage(null);
+    setEditingDropshipperId(null);
+
+    const fileInput = document.getElementById(
+      "dropshipper-product-image"
+    ) as HTMLInputElement | null;
+
+    if (fileInput) fileInput.value = "";
+  }
+
+  async function uploadProductImage(file: File, folder: string) {
+    const safeName = file.name.replace(/[^a-zA-Z0-9.-]/g, "-");
+    const fileName = `${folder}/${Date.now()}-${safeName}`;
+
+    const { data, error } = await supabase.storage
+      .from("product-images")
+      .upload(fileName, file, { upsert: false });
+
+    if (error) throw error;
+    return data.path;
+  }
+
+  function validateProductForm(values: typeof emptyForm) {
+    const discount = Number(values.discount_percent || 0);
+
+    if (!values.name.trim()) throw new Error("Enter a product name.");
+    if (!values.category) throw new Error("Select a product category.");
+    if (!Number.isFinite(Number(values.price)) || Number(values.price) <= 0)
+      throw new Error("Enter a valid product price.");
+    if (!Number.isFinite(discount) || discount < 0 || discount > 100)
+      throw new Error("Product discount must be between 0 and 100 percent.");
+    if (!Number.isInteger(Number(values.quantity)) || Number(values.quantity) < 0)
+      throw new Error("Quantity must be a whole number of zero or more.");
+
+    return discount;
   }
 
   async function saveProduct(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-
-    const discount = Number(form.discount_percent || 0);
-
-    if (!Number.isFinite(discount) || discount < 0 || discount > 100) {
-      setMessage("Product discount must be between 0 and 100 percent.");
-      return;
-    }
-
-    if (Number(form.price) <= 0) {
-      setMessage("Enter a valid product price.");
-      return;
-    }
-
     setLoading(true);
     setMessage("");
 
     try {
+      const discount = validateProductForm(form);
       let imagePath: string | null = null;
 
-      if (image) {
-        const safeName = image.name.replace(/[^a-zA-Z0-9.-]/g, "-");
-        const fileName = `${Date.now()}-${safeName}`;
-
-        const { data: uploaded, error: uploadError } =
-          await supabase.storage
-            .from("product-images")
-            .upload(fileName, image, { upsert: false });
-
-        if (uploadError) throw uploadError;
-        imagePath = uploaded.path;
-      }
+      if (image) imagePath = await uploadProductImage(image, "products");
 
       if (editingId) {
-        const currentProduct = products.find(
-          (product) => product.id === editingId
-        );
+        const current = products.find((p) => p.id === editingId);
 
         const updates: Record<string, unknown> = {
-          name: form.name,
+          name: form.name.trim(),
           description: form.description,
           price: Number(form.price),
           discount_percent: discount,
@@ -579,16 +585,14 @@ export default function AdminPage() {
 
         if (error) throw error;
 
-        if (imagePath && currentProduct?.image_path) {
-          await supabase.storage
-            .from("product-images")
-            .remove([currentProduct.image_path]);
+        if (imagePath && current?.image_path) {
+          await supabase.storage.from("product-images").remove([current.image_path]);
         }
 
         setMessage("Product updated successfully!");
       } else {
         const { error } = await supabase.from("products").insert({
-          name: form.name,
+          name: form.name.trim(),
           description: form.description,
           price: Number(form.price),
           discount_percent: discount,
@@ -600,59 +604,58 @@ export default function AdminPage() {
         });
 
         if (error) throw error;
-
         setMessage("Product added successfully!");
       }
 
-      resetForm();
+      resetProductForm();
       await loadProducts();
     } catch (error) {
-      setMessage(
-        "Error: " +
-          (error instanceof Error ? error.message : "Something went wrong.")
-      );
+      setMessage("Error: " + (error instanceof Error ? error.message : "Something went wrong."));
     } finally {
       setLoading(false);
     }
+  }
+
+  function editProduct(product: Product) {
+    setEditingId(product.id);
+    setForm({
+      name: product.name,
+      description: product.description || "",
+      price: String(product.price),
+      discount_percent: String(product.discount_percent || 0),
+      category: product.category,
+      origin: product.origin,
+      quantity: String(product.quantity),
+    });
+    setImage(null);
+    setTab("products");
+    setMessage("");
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   async function deleteProduct(product: Product) {
-    const confirmed = window.confirm(
-      `Are you sure you want to delete "${product.name}"?`
-    );
-
-    if (!confirmed) return;
+    if (!window.confirm(`Delete "${product.name}"?`)) return;
 
     setLoading(true);
-    setMessage("");
+    const { error } = await supabase
+      .from("products")
+      .delete()
+      .eq("id", product.id);
 
-    try {
-      const { error } = await supabase
-        .from("products")
-        .delete()
-        .eq("id", product.id);
-
-      if (error) throw error;
-
+    if (error) {
+      setMessage("Could not delete product: " + error.message);
+    } else {
       if (product.image_path) {
-        await supabase.storage
-          .from("product-images")
-          .remove([product.image_path]);
+        await supabase.storage.from("product-images").remove([product.image_path]);
       }
-
-      setMessage("Product deleted successfully!");
+      setMessage("Product deleted successfully.");
       await loadProducts();
-    } catch (error) {
-      setMessage(
-        "Error: " +
-          (error instanceof Error ? error.message : "Could not delete product.")
-      );
-    } finally {
-      setLoading(false);
     }
+
+    setLoading(false);
   }
 
-  async function toggleAvailability(product: Product) {
+  async function toggleProduct(product: Product) {
     const { error } = await supabase
       .from("products")
       .update({
@@ -661,13 +664,141 @@ export default function AdminPage() {
       })
       .eq("id", product.id);
 
+    if (error) setMessage("Could not update product: " + error.message);
+    else {
+      setMessage("Product availability updated.");
+      await loadProducts();
+    }
+  }
+
+  async function saveDropshipperProduct(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setLoading(true);
+    setMessage("");
+
+    try {
+      const discount = validateProductForm(dropshipperForm);
+      let imagePath: string | null = null;
+
+      if (dropshipperImage) {
+        imagePath = await uploadProductImage(dropshipperImage, "dropshipper");
+      }
+
+      if (editingDropshipperId) {
+        const current = dropshipperProducts.find(
+          (p) => p.id === editingDropshipperId
+        );
+
+        const updates: Record<string, unknown> = {
+          name: dropshipperForm.name.trim(),
+          description: dropshipperForm.description,
+          price: Number(dropshipperForm.price),
+          discount_percent: discount,
+          category: dropshipperForm.category,
+          origin: dropshipperForm.origin,
+          quantity: Number(dropshipperForm.quantity),
+          updated_at: new Date().toISOString(),
+        };
+
+        if (imagePath) updates.image_path = imagePath;
+
+        const { error } = await supabase
+          .from("dropshipper_products")
+          .update(updates)
+          .eq("id", editingDropshipperId);
+
+        if (error) throw error;
+
+        if (imagePath && current?.image_path) {
+          await supabase.storage.from("product-images").remove([current.image_path]);
+        }
+
+        setMessage("Dropshipper product updated successfully.");
+      } else {
+        const { error } = await supabase.from("dropshipper_products").insert({
+          name: dropshipperForm.name.trim(),
+          description: dropshipperForm.description,
+          price: Number(dropshipperForm.price),
+          discount_percent: discount,
+          category: dropshipperForm.category,
+          origin: dropshipperForm.origin,
+          quantity: Number(dropshipperForm.quantity),
+          image_path: imagePath,
+          is_active: true,
+        });
+
+        if (error) throw error;
+        setMessage("Dropshipper product added successfully.");
+      }
+
+      resetDropshipperForm();
+      await loadDropshipperProducts();
+    } catch (error) {
+      setMessage(
+        "Could not save dropshipper product: " +
+          (error instanceof Error ? error.message : "Something went wrong.")
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function editDropshipperProduct(product: Product) {
+    setEditingDropshipperId(product.id);
+    setDropshipperForm({
+      name: product.name,
+      description: product.description || "",
+      price: String(product.price),
+      discount_percent: String(product.discount_percent || 0),
+      category: product.category,
+      origin: product.origin,
+      quantity: String(product.quantity),
+    });
+    setDropshipperImage(null);
+    setMessage("");
+    setTab("dropshipper");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  async function deleteDropshipperProduct(product: Product) {
+    if (!window.confirm(`Delete dropshipper product "${product.name}"?`)) return;
+
+    setLoading(true);
+    setMessage("");
+
+    const { error } = await supabase
+      .from("dropshipper_products")
+      .delete()
+      .eq("id", product.id);
+
     if (error) {
-      setMessage("Could not update availability: " + error.message);
-      return;
+      setMessage("Could not delete dropshipper product: " + error.message);
+    } else {
+      if (product.image_path) {
+        await supabase.storage.from("product-images").remove([product.image_path]);
+      }
+      setMessage("Dropshipper product deleted.");
+      await loadDropshipperProducts();
     }
 
-    setMessage("Product availability updated.");
-    await loadProducts();
+    setLoading(false);
+  }
+
+  async function toggleDropshipperProduct(product: Product) {
+    const { error } = await supabase
+      .from("dropshipper_products")
+      .update({
+        is_active: !product.is_active,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", product.id);
+
+    if (error) {
+      setMessage("Could not update dropshipper product: " + error.message);
+    } else {
+      setMessage("Dropshipper product availability updated.");
+      await loadDropshipperProducts();
+    }
   }
 
   function resetPromoForm() {
@@ -676,18 +807,24 @@ export default function AdminPage() {
   }
 
   function editPromo(promo: PromoCode) {
+    const localDate = (value: string | null) => {
+      if (!value) return "";
+      const d = new Date(value);
+      return new Date(d.getTime() - d.getTimezoneOffset() * 60000)
+        .toISOString()
+        .slice(0, 16);
+    };
+
     setEditingPromoId(promo.id);
     setPromoForm({
       code: promo.code,
       discount_type: promo.discount_type,
       discount_value: String(promo.discount_value),
       minimum_order_amount: String(promo.minimum_order_amount || 0),
-      starts_at: toLocalDateTime(promo.starts_at),
-      expires_at: toLocalDateTime(promo.expires_at),
-      usage_limit:
-        promo.usage_limit === null ? "" : String(promo.usage_limit),
+      starts_at: localDate(promo.starts_at),
+      expires_at: localDate(promo.expires_at),
+      usage_limit: promo.usage_limit === null ? "" : String(promo.usage_limit),
     });
-
     setMessage("");
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -699,30 +836,20 @@ export default function AdminPage() {
     const value = Number(promoForm.discount_value);
     const minimum = Number(promoForm.minimum_order_amount || 0);
     const usageLimit =
-      promoForm.usage_limit.trim() === ""
-        ? null
-        : Number(promoForm.usage_limit);
+      promoForm.usage_limit.trim() === "" ? null : Number(promoForm.usage_limit);
 
-    if (!code) {
-      setMessage("Enter a promo code.");
+    if (!code || !Number.isFinite(value) || value <= 0) {
+      setMessage("Enter a valid promo code and discount value.");
       return;
     }
-
-    if (!Number.isFinite(value) || value <= 0) {
-      setMessage("Enter a valid discount value.");
-      return;
-    }
-
     if (promoForm.discount_type === "percentage" && value > 100) {
-      setMessage("Percentage promo discounts cannot exceed 100%.");
+      setMessage("Percentage discounts cannot exceed 100%.");
       return;
     }
-
     if (!Number.isFinite(minimum) || minimum < 0) {
       setMessage("Enter a valid minimum order amount.");
       return;
     }
-
     if (
       usageLimit !== null &&
       (!Number.isInteger(usageLimit) || usageLimit < 1)
@@ -734,15 +861,11 @@ export default function AdminPage() {
     const startsAt = promoForm.starts_at
       ? new Date(promoForm.starts_at).toISOString()
       : new Date().toISOString();
-
     const expiresAt = promoForm.expires_at
       ? new Date(promoForm.expires_at).toISOString()
       : null;
 
-    if (
-      expiresAt &&
-      new Date(expiresAt).getTime() <= new Date(startsAt).getTime()
-    ) {
+    if (expiresAt && new Date(expiresAt) <= new Date(startsAt)) {
       setMessage("The expiry date must be after the start date.");
       return;
     }
@@ -750,139 +873,73 @@ export default function AdminPage() {
     setLoading(true);
     setMessage("");
 
-    try {
-      const promoData = {
-        code,
-        discount_type: promoForm.discount_type,
-        discount_value: value,
-        minimum_order_amount: minimum,
-        starts_at: startsAt,
-        expires_at: expiresAt,
-        usage_limit: usageLimit,
-      };
+    const promoData = {
+      code,
+      discount_type: promoForm.discount_type,
+      discount_value: value,
+      minimum_order_amount: minimum,
+      starts_at: startsAt,
+      expires_at: expiresAt,
+      usage_limit: usageLimit,
+    };
 
-      if (editingPromoId) {
-        const { error } = await supabase
-          .from("promo_codes")
-          .update(promoData)
-          .eq("id", editingPromoId);
-
-        if (error) throw error;
-
-        setMessage("Promo code updated successfully.");
-      } else {
-        const { error } = await supabase.from("promo_codes").insert({
+    const result = editingPromoId
+      ? await supabase.from("promo_codes").update(promoData).eq("id", editingPromoId)
+      : await supabase.from("promo_codes").insert({
           ...promoData,
           usage_count: 0,
           is_active: true,
         });
 
-        if (error) {
-          if (error.code === "23505") {
-            throw new Error("This promo code already exists.");
-          }
-          throw error;
-        }
-
-        setMessage("Promo code created successfully.");
-      }
-
+    if (result.error) {
+      setMessage("Could not save promo code: " + result.error.message);
+    } else {
+      setMessage(editingPromoId ? "Promo code updated." : "Promo code created.");
       resetPromoForm();
       await loadPromoCodes();
-    } catch (error) {
-      setMessage(
-        "Could not save promo code: " +
-          (error instanceof Error ? error.message : "Something went wrong.")
-      );
-    } finally {
-      setLoading(false);
     }
+
+    setLoading(false);
   }
 
   async function togglePromo(promo: PromoCode) {
     setLoading(true);
-    setMessage("");
-
     const { error } = await supabase
       .from("promo_codes")
       .update({ is_active: !promo.is_active })
       .eq("id", promo.id);
 
-    if (error) {
-      setMessage("Could not update promo code: " + error.message);
-    } else {
-      setMessage(
-        promo.is_active
-          ? "Promo code deactivated."
-          : "Promo code activated."
-      );
-      await loadPromoCodes();
-    }
-
+    setMessage(error ? error.message : "Promo code status updated.");
+    if (!error) await loadPromoCodes();
     setLoading(false);
   }
 
   async function deletePromo(promo: PromoCode) {
-    const confirmed = window.confirm(
-      `Delete promo code "${promo.code}"? This cannot be undone.`
-    );
-
-    if (!confirmed) return;
+    if (!window.confirm(`Delete promo code "${promo.code}"?`)) return;
 
     setLoading(true);
-    setMessage("");
-
     const { error } = await supabase
       .from("promo_codes")
       .delete()
       .eq("id", promo.id);
 
-    if (error) {
-      setMessage("Could not delete promo code: " + error.message);
-    } else {
-      setMessage("Promo code deleted.");
+    setMessage(error ? error.message : "Promo code deleted.");
+    if (!error) {
       if (editingPromoId === promo.id) resetPromoForm();
       await loadPromoCodes();
     }
-
     setLoading(false);
   }
 
-  function updateOrderLine(
-    index: number,
-    field: keyof OrderLine,
-    value: string
-  ) {
+  function updateOrderLine(index: number, field: keyof OrderLine, value: string) {
     setOrderLines((previous) =>
-      previous.map((line, i) =>
-        i === index ? { ...line, [field]: value } : line
-      )
-    );
-  }
-
-  function addOrderLine() {
-    setOrderLines((previous) => [
-      ...previous,
-      { product_id: "", quantity: "1" },
-    ]);
-  }
-
-  function removeOrderLine(index: number) {
-    setOrderLines((previous) =>
-      previous.length === 1
-        ? previous
-        : previous.filter((_, i) => i !== index)
+      previous.map((line, i) => (i === index ? { ...line, [field]: value } : line))
     );
   }
 
   const orderTotal = orderLines.reduce((total, line) => {
-    const product = products.find((item) => item.id === line.product_id);
-
-    return (
-      total +
-      (product ? discountedPrice(product) : 0) *
-        Number(line.quantity || 0)
-    );
+    const product = products.find((p) => p.id === line.product_id);
+    return total + (product ? discountedPrice(product) : 0) * Number(line.quantity || 0);
   }, 0);
 
   async function createOrder(e: FormEvent<HTMLFormElement>) {
@@ -897,8 +954,8 @@ export default function AdminPage() {
       (line) => line.product_id && Number(line.quantity) > 0
     );
 
-    if (validLines.length === 0) {
-      setMessage("Please add at least one product to this order.");
+    if (!validLines.length) {
+      setMessage("Add at least one product to this order.");
       return;
     }
 
@@ -906,17 +963,11 @@ export default function AdminPage() {
     setMessage("");
 
     try {
-      const customer = customers.find(
-        (item) => item.user_id === selectedCustomer
-      );
-
-      if (!customer) throw new Error("Selected customer could not be found.");
+      const customer = customers.find((c) => c.user_id === selectedCustomer);
+      if (!customer) throw new Error("Customer could not be found.");
 
       const preparedItems = validLines.map((line) => {
-        const product = products.find(
-          (item) => item.id === line.product_id
-        );
-
+        const product = products.find((p) => p.id === line.product_id);
         if (!product) throw new Error("A selected product could not be found.");
 
         const quantity = Number(line.quantity);
@@ -931,11 +982,7 @@ export default function AdminPage() {
         };
       });
 
-      const subtotal = preparedItems.reduce(
-        (sum, item) => sum + item.total_price,
-        0
-      );
-
+      const subtotal = preparedItems.reduce((sum, item) => sum + item.total_price, 0);
       const orderNumber = makeReference("ORA");
 
       const { data: newOrder, error: orderError } = await supabase
@@ -954,35 +1001,21 @@ export default function AdminPage() {
 
       if (orderError) throw orderError;
 
-      const { error: itemsError } = await supabase
-        .from("order_items")
-        .insert(
-          preparedItems.map((item) => ({
-            order_id: newOrder.id,
-            ...item,
-          }))
-        );
+      const { error: itemsError } = await supabase.from("order_items").insert(
+        preparedItems.map((item) => ({ order_id: newOrder.id, ...item }))
+      );
 
       if (itemsError) {
-        await supabase
-          .from("customer_orders")
-          .delete()
-          .eq("id", newOrder.id);
-
+        await supabase.from("customer_orders").delete().eq("id", newOrder.id);
         throw itemsError;
       }
 
-      setMessage(
-        `Order ${orderNumber} created for ${customer.full_name || customer.email}.`
-      );
+      setMessage(`Order ${orderNumber} created successfully.`);
       setSelectedCustomer("");
       setOrderLines([{ product_id: "", quantity: "1" }]);
       await loadOrders();
     } catch (error) {
-      setMessage(
-        "Could not create order: " +
-          (error instanceof Error ? error.message : "Something went wrong.")
-      );
+      setMessage(error instanceof Error ? error.message : "Could not create order.");
     } finally {
       setLoading(false);
     }
@@ -998,59 +1031,38 @@ export default function AdminPage() {
       shipping_carrier: order.shipping_carrier || "",
       shipping_notes: order.shipping_notes || "",
       shipping_tracking_url: order.shipping_tracking_url || "",
-      shipping_dispatch_date: order.shipping_dispatch_date
-        ? order.shipping_dispatch_date.slice(0, 10)
-        : "",
-      shipping_estimated_delivery: order.shipping_estimated_delivery
-        ? order.shipping_estimated_delivery.slice(0, 10)
-        : "",
+      shipping_dispatch_date: order.shipping_dispatch_date?.slice(0, 10) || "",
+      shipping_estimated_delivery:
+        order.shipping_estimated_delivery?.slice(0, 10) || "",
       shipping_fee: String(order.shipping_fee || 0),
     });
   }
 
   async function saveOrderUpdate(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-
     if (!editingOrder) return;
 
-    const shippingFee = Number(orderUpdate.shipping_fee);
-
-    if (!Number.isFinite(shippingFee) || shippingFee < 0) {
+    const fee = Number(orderUpdate.shipping_fee);
+    if (!Number.isFinite(fee) || fee < 0) {
       setMessage("Enter a valid shipping fee.");
       return;
     }
-
     if (
       orderUpdate.shipping_tracking_url.trim() &&
       !/^https?:\/\/.+/i.test(orderUpdate.shipping_tracking_url.trim())
     ) {
-      setMessage("Enter a valid tracking link beginning with https:// or http://.");
+      setMessage("Enter a valid tracking link.");
       return;
     }
-
-    const previousFee = Number(editingOrder.shipping_fee || 0);
-
     if (
       editingOrder.shipping_payment_status === "Paid" &&
-      shippingFee !== previousFee
+      fee !== Number(editingOrder.shipping_fee || 0)
     ) {
-      setMessage(
-        "This shipping fee has already been paid and cannot be changed."
-      );
+      setMessage("A shipping fee that has been paid cannot be changed.");
       return;
     }
 
     setLoading(true);
-    setMessage("");
-
-    const shippingPaymentStatus =
-      shippingFee <= 0
-        ? "Not required"
-        : editingOrder.shipping_payment_status === "Paid"
-          ? "Paid"
-          : "Pending";
-
-    const feeChanged = shippingFee !== previousFee;
 
     const { error } = await supabase
       .from("customer_orders")
@@ -1061,25 +1073,24 @@ export default function AdminPage() {
         tracking_number: orderUpdate.tracking_number.trim() || null,
         shipping_carrier: orderUpdate.shipping_carrier.trim() || null,
         shipping_notes: orderUpdate.shipping_notes.trim() || null,
-        shipping_tracking_url:
-          orderUpdate.shipping_tracking_url.trim() || null,
-        shipping_dispatch_date:
-          orderUpdate.shipping_dispatch_date || null,
-        shipping_estimated_delivery:
-          orderUpdate.shipping_estimated_delivery || null,
-        shipping_fee: shippingFee,
-        shipping_payment_status: shippingPaymentStatus,
-        ...(feeChanged ? { shipping_payment_reference: null } : {}),
-        update_at: new Date().toISOString(),
+        shipping_tracking_url: orderUpdate.shipping_tracking_url.trim() || null,
+        shipping_dispatch_date: orderUpdate.shipping_dispatch_date || null,
+        shipping_estimated_delivery: orderUpdate.shipping_estimated_delivery || null,
+        shipping_fee: fee,
+        shipping_payment_status:
+          fee <= 0
+            ? "Not required"
+            : editingOrder.shipping_payment_status === "Paid"
+              ? "Paid"
+              : "Pending",
+        updated_at: new Date().toISOString(),
       })
       .eq("id", editingOrder.id);
 
     if (error) {
       setMessage("Could not update order: " + error.message);
     } else {
-      setMessage(
-        `Order ${editingOrder.order_number} updated successfully.`
-      );
+      setMessage(`Order ${editingOrder.order_number} updated.`);
       setEditingOrder(null);
       await loadOrders();
     }
@@ -1087,18 +1098,11 @@ export default function AdminPage() {
     setLoading(false);
   }
 
-  function openInvoiceForm(order: Order) {
-    setInvoiceOrder(order);
-    setInvoiceDueDate("");
-  }
-
   async function createInvoice(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!invoiceOrder) return;
 
     setLoading(true);
-    setMessage("");
-
     const { error } = await supabase.from("customer_invoices").insert({
       user_id: invoiceOrder.user_id,
       order_id: invoiceOrder.id,
@@ -1109,23 +1113,12 @@ export default function AdminPage() {
       due_date: invoiceDueDate || null,
     });
 
-    if (error) {
-      setMessage("Could not create invoice: " + error.message);
-    } else {
-      setMessage(`Invoice created for order ${invoiceOrder.order_number}.`);
+    setMessage(error ? error.message : "Invoice created successfully.");
+    if (!error) {
       setInvoiceOrder(null);
       await loadInvoices();
     }
-
     setLoading(false);
-  }
-
-  function openReceiptForm(order: Order) {
-    setReceiptOrder(order);
-    setReceiptAmount(String(order.total_amount));
-    setReceiptMethod("Bank Transfer");
-    setReceiptReference("");
-    setReceiptNotes("");
   }
 
   async function createReceipt(e: FormEvent<HTMLFormElement>) {
@@ -1133,14 +1126,12 @@ export default function AdminPage() {
     if (!receiptOrder) return;
 
     const amount = Number(receiptAmount);
-
-    if (!amount || amount <= 0) {
+    if (!Number.isFinite(amount) || amount <= 0) {
       setMessage("Enter a valid payment amount.");
       return;
     }
 
     setLoading(true);
-    setMessage("");
 
     const { error } = await supabase.from("customer_receipts").insert({
       user_id: receiptOrder.user_id,
@@ -1159,21 +1150,17 @@ export default function AdminPage() {
         .from("customer_orders")
         .update({
           payment_status:
-            amount >= Number(receiptOrder.total_amount)
-              ? "Paid"
-              : "Partially paid",
-          update_at: new Date().toISOString(),
+            amount >= Number(receiptOrder.total_amount) ? "Paid" : "Partially paid",
+          updated_at: new Date().toISOString(),
         })
         .eq("id", receiptOrder.id);
 
-      if (paymentError) {
-        setMessage(
-          "Receipt created, but payment status could not be updated: " +
-            paymentError.message
-        );
-      } else {
-        setMessage("Payment receipt created and order payment status updated.");
-      }
+      setMessage(
+        paymentError
+          ? "Receipt created, but order payment status could not be updated: " +
+              paymentError.message
+          : "Payment receipt created successfully."
+      );
 
       setReceiptOrder(null);
       await Promise.all([loadReceipts(), loadOrders()]);
@@ -1183,17 +1170,16 @@ export default function AdminPage() {
   }
 
   function customerName(userId: string) {
-    const customer = customers.find((item) => item.user_id === userId);
+    const customer = customers.find((c) => c.user_id === userId);
     return customer?.full_name || customer?.email || "Customer";
   }
 
   function customerEmail(userId: string) {
-    return customers.find((item) => item.user_id === userId)?.email || "";
+    return customers.find((c) => c.user_id === userId)?.email || "";
   }
 
   function orderFor(orderId: string | null) {
-    if (!orderId) return null;
-    return orders.find((order) => order.id === orderId) || null;
+    return orders.find((o) => o.id === orderId) || null;
   }
 
   function itemsFor(orderId: string) {
@@ -1202,6 +1188,268 @@ export default function AdminPage() {
 
   function printDocument() {
     window.print();
+  }
+
+  function copyPromo(code: string) {
+    navigator.clipboard?.writeText(code).then(
+      () => setMessage("Promo code copied."),
+      () => window.prompt("Copy this promo code:", code)
+    );
+  }
+
+  function renderProductForm(
+    values: typeof emptyForm,
+    setValues: (value: typeof emptyForm) => void,
+    selectedImage: File | null,
+    setSelectedImage: (file: File | null) => void,
+    submit: (e: FormEvent<HTMLFormElement>) => void,
+    isEditing: boolean,
+    imageInputId: string,
+    reset: () => void
+  ) {
+    return (
+      <form onSubmit={submit} className="grid gap-5 sm:grid-cols-2">
+        <div>
+          <label className={labelStyle}>Product Name</label>
+          <input
+            value={values.name}
+            onChange={(e) => setValues({ ...values, name: e.target.value })}
+            required
+            className={inputStyle}
+            placeholder="Enter product name"
+          />
+        </div>
+
+        <div>
+          <label className={labelStyle}>Price (₦)</label>
+          <input
+            type="number"
+            min="0.01"
+            step="0.01"
+            value={values.price}
+            onChange={(e) => setValues({ ...values, price: e.target.value })}
+            required
+            className={inputStyle}
+          />
+        </div>
+
+        <div>
+          <label className={labelStyle}>Product Discount (%)</label>
+          <input
+            type="number"
+            min="0"
+            max="100"
+            step="0.01"
+            value={values.discount_percent}
+            onChange={(e) =>
+              setValues({ ...values, discount_percent: e.target.value })
+            }
+            className={inputStyle}
+          />
+          <p className="mt-1 text-xs text-[#756574]">
+            Enter 0 for no discount.
+          </p>
+        </div>
+
+        <div>
+          <label className={labelStyle}>Category</label>
+          <select
+            value={values.category}
+            onChange={(e) => setValues({ ...values, category: e.target.value })}
+            required
+            className={inputStyle}
+          >
+            <option value="">Select a category</option>
+            {categories.map((category) => (
+              <option key={category}>{category}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label className={labelStyle}>Product Origin</label>
+          <select
+            value={values.origin}
+            onChange={(e) => setValues({ ...values, origin: e.target.value })}
+            className={inputStyle}
+          >
+            <option>In stock in Nigeria</option>
+            <option>China preorder</option>
+            <option>Other</option>
+          </select>
+        </div>
+
+        <div>
+          <label className={labelStyle}>Quantity</label>
+          <input
+            type="number"
+            min="0"
+            step="1"
+            value={values.quantity}
+            onChange={(e) => setValues({ ...values, quantity: e.target.value })}
+            required
+            className={inputStyle}
+          />
+        </div>
+
+        <div>
+          <label className={labelStyle}>Product Photo</label>
+          <input
+            id={imageInputId}
+            type="file"
+            accept="image/*"
+            onChange={(e) => setSelectedImage(e.target.files?.[0] || null)}
+            className={inputStyle}
+          />
+          {isEditing && (
+            <p className="mt-1 text-xs text-[#756574]">
+              Leave empty to keep the current photo.
+            </p>
+          )}
+        </div>
+
+        <div className="sm:col-span-2">
+          <label className={labelStyle}>Description</label>
+          <textarea
+            value={values.description}
+            onChange={(e) =>
+              setValues({ ...values, description: e.target.value })
+            }
+            rows={4}
+            className={inputStyle}
+            placeholder="Describe this product..."
+          />
+        </div>
+
+        <div className="flex flex-wrap gap-3 sm:col-span-2">
+          <button
+            type="submit"
+            disabled={loading}
+            className="rounded-xl bg-[#75436d] px-7 py-3 font-semibold text-white disabled:opacity-50"
+          >
+            {loading ? "Saving..." : isEditing ? "Save Changes" : "Add Product"}
+          </button>
+
+          {isEditing && (
+            <button
+              type="button"
+              onClick={reset}
+              className="rounded-xl border border-[#eadce6] px-7 py-3 text-[#43243b]"
+            >
+              Cancel Edit
+            </button>
+          )}
+        </div>
+      </form>
+    );
+  }
+
+  function renderProductCards(
+    items: Product[],
+    edit: (product: Product) => void,
+    toggle: (product: Product) => void,
+    remove: (product: Product) => void,
+    refresh: () => void,
+    title: string
+  ) {
+    return (
+      <section>
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-xl font-bold text-[#43243b]">
+            {title} ({items.length})
+          </h2>
+          <button
+            onClick={refresh}
+            className="rounded-xl border border-[#eadce6] bg-white px-4 py-2 text-sm"
+          >
+            Refresh
+          </button>
+        </div>
+
+        {items.length === 0 ? (
+          <div className="rounded-xl bg-white p-8 text-center text-[#756574]">
+            No products added yet.
+          </div>
+        ) : (
+          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            {items.map((product) => (
+              <article
+                key={product.id}
+                className="overflow-hidden rounded-2xl border border-[#f0e2ec] bg-white shadow-sm"
+              >
+                {product.imageUrl ? (
+                  <img
+                    src={product.imageUrl}
+                    alt={product.name}
+                    className="h-56 w-full object-cover"
+                  />
+                ) : (
+                  <div className="flex h-56 items-center justify-center bg-[#f9edf5] text-[#75436d]">
+                    No product image
+                  </div>
+                )}
+
+                <div className="p-5">
+                  <h3 className="font-bold text-[#43243b]">{product.name}</h3>
+
+                  {product.discount_percent > 0 ? (
+                    <div className="mt-2">
+                      <p className="text-sm text-gray-500 line-through">
+                        {money(product.price)}
+                      </p>
+                      <p className="font-bold text-[#75436d]">
+                        {money(discountedPrice(product))}
+                      </p>
+                      <span className="mt-1 inline-block rounded-full bg-pink-100 px-3 py-1 text-xs font-semibold text-[#75436d]">
+                        {product.discount_percent}% OFF
+                      </span>
+                    </div>
+                  ) : (
+                    <p className="mt-2 font-semibold">{money(product.price)}</p>
+                  )}
+
+                  <p className="mt-2 text-sm text-[#756574]">
+                    {product.category} · {product.origin}
+                  </p>
+                  <p className="mt-1 text-sm text-[#756574]">
+                    Quantity: {product.quantity}
+                  </p>
+                  <p className="mt-2 text-sm">
+                    {product.is_active ? (
+                      <span className="text-green-700">Active</span>
+                    ) : (
+                      <span className="text-red-600">Hidden</span>
+                    )}
+                  </p>
+
+                  <div className="mt-5 flex flex-wrap gap-2">
+                    <button
+                      onClick={() => edit(product)}
+                      className="rounded-lg bg-[#75436d] px-4 py-2 text-sm text-white"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => toggle(product)}
+                      className="rounded-lg border border-[#eadce6] px-4 py-2 text-sm"
+                    >
+                      {product.is_active ? "Hide" : "Show"}
+                    </button>
+                    <button
+                      onClick={() => remove(product)}
+                      disabled={loading}
+                      className="rounded-lg border border-red-300 px-4 py-2 text-sm text-red-600"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+    );
   }
 
   if (checking) {
@@ -1219,9 +1467,7 @@ export default function AdminPage() {
           onSubmit={login}
           className="w-full max-w-md rounded-2xl border border-[#f0e2ec] bg-white p-8 shadow-sm"
         >
-          <h1 className="text-3xl font-bold text-[#43243b]">
-            Oraia by Dara
-          </h1>
+          <h1 className="text-3xl font-bold text-[#43243b]">Oraia by Dara</h1>
           <p className="mb-7 mt-2 text-sm text-[#756574]">Admin Login</p>
 
           <label className={labelStyle}>Email</label>
@@ -1242,13 +1488,11 @@ export default function AdminPage() {
             className={`${inputStyle} mb-5`}
           />
 
-          {message && (
-            <p className="mb-4 text-sm text-red-600">{message}</p>
-          )}
+          {message && <p className="mb-4 text-sm text-red-600">{message}</p>}
 
           <button
             disabled={loading}
-            className="w-full rounded-xl bg-[#75436d] p-3 font-semibold text-white hover:bg-[#603657] disabled:opacity-50"
+            className="w-full rounded-xl bg-[#75436d] p-3 font-semibold text-white disabled:opacity-50"
           >
             {loading ? "Logging in..." : "Login"}
           </button>
@@ -1262,9 +1506,7 @@ export default function AdminPage() {
       <div className="mx-auto max-w-7xl">
         <header className="mb-8 flex flex-wrap items-center justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-[#43243b]">
-              Oraia by Dara
-            </h1>
+            <h1 className="text-3xl font-bold text-[#43243b]">Oraia by Dara</h1>
             <p className="mt-1 text-sm text-[#756574]">
               Admin Management Dashboard
             </p>
@@ -1272,7 +1514,7 @@ export default function AdminPage() {
 
           <button
             onClick={logout}
-            className="rounded-xl border border-[#75436d] px-5 py-2.5 text-sm font-semibold text-[#75436d] hover:bg-[#f9edf5]"
+            className="rounded-xl border border-[#75436d] px-5 py-2.5 text-sm font-semibold text-[#75436d]"
           >
             Logout
           </button>
@@ -1290,9 +1532,10 @@ export default function AdminPage() {
           </div>
         )}
 
-        <div className="mb-7 grid grid-cols-2 gap-3 sm:grid-cols-5">
+        <div className="mb-7 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
           {[
             ["Products", products.length],
+            ["Dropshipper Products", dropshipperProducts.length],
             ["Customers", customers.length],
             ["Orders", orders.length],
             ["Invoices", invoices.length],
@@ -1303,9 +1546,7 @@ export default function AdminPage() {
               className="rounded-2xl border border-[#f0e2ec] bg-white p-4 shadow-sm"
             >
               <p className="text-sm text-[#756574]">{label}</p>
-              <p className="mt-2 text-2xl font-bold text-[#43243b]">
-                {value}
-              </p>
+              <p className="mt-2 text-2xl font-bold text-[#43243b]">{value}</p>
             </div>
           ))}
         </div>
@@ -1314,6 +1555,7 @@ export default function AdminPage() {
           {(
             [
               ["products", "Products"],
+              ["dropshipper", "Dropshipper Products"],
               ["discounts", "Discounts & Promo Codes"],
               ["orders", "Orders"],
               ["invoices", "Invoices"],
@@ -1329,7 +1571,7 @@ export default function AdminPage() {
               className={`rounded-xl px-5 py-3 text-sm font-semibold ${
                 tab === key
                   ? "bg-[#75436d] text-white"
-                  : "border border-[#eadce6] bg-white text-[#43243b] hover:bg-[#f9edf5]"
+                  : "border border-[#eadce6] bg-white text-[#43243b]"
               }`}
             >
               {label}
@@ -1343,287 +1585,77 @@ export default function AdminPage() {
               <h2 className="mb-6 text-xl font-bold text-[#43243b]">
                 {editingId ? "Edit Product" : "Add New Product"}
               </h2>
-
-              <form onSubmit={saveProduct} className="grid gap-5 sm:grid-cols-2">
-                <div>
-                  <label className={labelStyle}>Product Name</label>
-                  <input
-                    value={form.name}
-                    onChange={(e) =>
-                      setForm({ ...form, name: e.target.value })
-                    }
-                    required
-                    className={inputStyle}
-                    placeholder="Enter product name"
-                  />
-                </div>
-
-                <div>
-                  <label className={labelStyle}>Price (₦)</label>
-                  <input
-                    type="number"
-                    min="0.01"
-                    step="0.01"
-                    value={form.price}
-                    onChange={(e) =>
-                      setForm({ ...form, price: e.target.value })
-                    }
-                    required
-                    className={inputStyle}
-                    placeholder="Enter price"
-                  />
-                </div>
-
-                <div>
-                  <label className={labelStyle}>Product Discount (%)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    max="100"
-                    step="0.01"
-                    value={form.discount_percent}
-                    onChange={(e) =>
-                      setForm({
-                        ...form,
-                        discount_percent: e.target.value,
-                      })
-                    }
-                    className={inputStyle}
-                    placeholder="0"
-                  />
-                  <p className="mt-1 text-xs text-[#756574]">
-                    Enter 0 for no discount. Enter 20 for 20% off.
-                  </p>
-                  {Number(form.price) > 0 &&
-                    Number(form.discount_percent) > 0 &&
-                    Number(form.discount_percent) <= 100 && (
-                      <p className="mt-2 text-sm font-semibold text-green-700">
-                        Customer price:{" "}
-                        {money(
-                          Number(form.price) *
-                            (1 - Number(form.discount_percent) / 100)
-                        )}
-                      </p>
-                    )}
-                </div>
-
-                <div>
-                  <label className={labelStyle}>Category</label>
-                  <select
-                    value={form.category}
-                    onChange={(e) =>
-                      setForm({ ...form, category: e.target.value })
-                    }
-                    required
-                    className={inputStyle}
-                  >
-                    <option value="">Select a category</option>
-                    {categories.map((category) => (
-                      <option key={category} value={category}>
-                        {category}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className={labelStyle}>Product Origin</label>
-                  <select
-                    value={form.origin}
-                    onChange={(e) =>
-                      setForm({ ...form, origin: e.target.value })
-                    }
-                    className={inputStyle}
-                  >
-                    <option>In stock in Nigeria</option>
-                    <option>China preorder</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className={labelStyle}>Quantity</label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={form.quantity}
-                    onChange={(e) =>
-                      setForm({ ...form, quantity: e.target.value })
-                    }
-                    required
-                    className={inputStyle}
-                  />
-                </div>
-
-                <div>
-                  <label className={labelStyle}>Product Photo</label>
-                  <input
-                    id="product-image"
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) =>
-                      setImage(e.target.files?.[0] || null)
-                    }
-                    className={inputStyle}
-                  />
-                  {editingId && (
-                    <p className="mt-1 text-xs text-[#756574]">
-                      Leave empty to keep the current photo.
-                    </p>
-                  )}
-                </div>
-
-                <div className="sm:col-span-2">
-                  <label className={labelStyle}>Description</label>
-                  <textarea
-                    value={form.description}
-                    onChange={(e) =>
-                      setForm({ ...form, description: e.target.value })
-                    }
-                    rows={4}
-                    className={inputStyle}
-                    placeholder="Describe this product..."
-                  />
-                </div>
-
-                <div className="flex flex-wrap gap-3 sm:col-span-2">
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className="rounded-xl bg-[#75436d] px-7 py-3 font-semibold text-white hover:bg-[#603657] disabled:opacity-50"
-                  >
-                    {loading
-                      ? "Saving..."
-                      : editingId
-                        ? "Save Changes"
-                        : "Add Product"}
-                  </button>
-
-                  {editingId && (
-                    <button
-                      type="button"
-                      onClick={resetForm}
-                      className="rounded-xl border border-[#eadce6] px-7 py-3 text-[#43243b]"
-                    >
-                      Cancel Edit
-                    </button>
-                  )}
-                </div>
-              </form>
-            </section>
-
-            <section>
-              <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-                <h2 className="text-xl font-bold text-[#43243b]">
-                  Your Products ({products.length})
-                </h2>
-                <button
-                  onClick={loadProducts}
-                  className="rounded-xl border border-[#eadce6] bg-white px-4 py-2 text-sm text-[#43243b]"
-                >
-                  Refresh Products
-                </button>
-              </div>
-
-              {products.length === 0 ? (
-                <div className="rounded-xl bg-white p-8 text-center text-[#756574]">
-                  No products added yet.
-                </div>
-              ) : (
-                <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-                  {products.map((product) => (
-                    <article
-                      key={product.id}
-                      className="overflow-hidden rounded-2xl border border-[#f0e2ec] bg-white shadow-sm"
-                    >
-                      {product.imageUrl ? (
-                        <img
-                          src={product.imageUrl}
-                          alt={product.name}
-                          className="h-56 w-full object-cover"
-                        />
-                      ) : (
-                        <div className="flex h-56 items-center justify-center bg-[#f9edf5] text-[#75436d]">
-                          No product image
-                        </div>
-                      )}
-
-                      <div className="p-5">
-                        <h3 className="font-bold text-[#43243b]">
-                          {product.name}
-                        </h3>
-
-                        {product.discount_percent > 0 ? (
-                          <div className="mt-2">
-                            <p className="text-sm text-gray-500 line-through">
-                              {money(product.price)}
-                            </p>
-                            <p className="font-bold text-[#75436d]">
-                              {money(discountedPrice(product))}
-                            </p>
-                            <span className="mt-1 inline-block rounded-full bg-pink-100 px-3 py-1 text-xs font-semibold text-[#75436d]">
-                              {product.discount_percent}% OFF
-                            </span>
-                          </div>
-                        ) : (
-                          <p className="mt-2 font-semibold text-[#302331]">
-                            {money(product.price)}
-                          </p>
-                        )}
-
-                        <p className="mt-2 text-sm text-[#756574]">
-                          {product.category} · {product.origin}
-                        </p>
-                        <p className="mt-1 text-sm text-[#756574]">
-                          Quantity: {product.quantity}
-                        </p>
-                        <p className="mt-2 text-sm">
-                          {product.is_active ? (
-                            <span className="text-green-700">Active</span>
-                          ) : (
-                            <span className="text-red-600">Hidden</span>
-                          )}
-                        </p>
-
-                        <div className="mt-5 flex flex-wrap gap-2">
-                          <button
-                            onClick={() => startEditing(product)}
-                            className="rounded-lg bg-[#75436d] px-4 py-2 text-sm text-white"
-                          >
-                            Edit
-                          </button>
-                          <button
-                            onClick={() => toggleAvailability(product)}
-                            className="rounded-lg border border-[#eadce6] px-4 py-2 text-sm text-[#43243b]"
-                          >
-                            {product.is_active ? "Hide" : "Show"}
-                          </button>
-                          <button
-                            onClick={() => deleteProduct(product)}
-                            className="rounded-lg border border-red-300 px-4 py-2 text-sm text-red-600"
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </div>
-                    </article>
-                  ))}
-                </div>
+              {renderProductForm(
+                form,
+                setForm,
+                image,
+                setImage,
+                saveProduct,
+                !!editingId,
+                "product-image",
+                resetProductForm
               )}
             </section>
+
+            {renderProductCards(
+              products,
+              editProduct,
+              toggleProduct,
+              deleteProduct,
+              loadProducts,
+              "Your Products"
+            )}
+          </>
+        )}
+
+        {tab === "dropshipper" && (
+          <>
+            <section className="mb-6 rounded-2xl border border-[#eadce6] bg-[#f9edf5] p-5 sm:p-6">
+              <h2 className="text-xl font-bold text-[#43243b]">
+                Dropshipper Product Catalogue
+              </h2>
+              <p className="mt-2 text-sm text-[#756574]">
+                Products added here belong only to the dropshipper catalogue.
+                They are stored separately from your normal customer products.
+              </p>
+            </section>
+
+            <section className="mb-10 rounded-2xl border border-[#f0e2ec] bg-white p-5 shadow-sm sm:p-7">
+              <h2 className="mb-6 text-xl font-bold text-[#43243b]">
+                {editingDropshipperId
+                  ? "Edit Dropshipper Product"
+                  : "Add Dropshipper Product"}
+              </h2>
+
+              {renderProductForm(
+                dropshipperForm,
+                setDropshipperForm,
+                dropshipperImage,
+                setDropshipperImage,
+                saveDropshipperProduct,
+                !!editingDropshipperId,
+                "dropshipper-product-image",
+                resetDropshipperForm
+              )}
+            </section>
+
+            {renderProductCards(
+              dropshipperProducts,
+              editDropshipperProduct,
+              toggleDropshipperProduct,
+              deleteDropshipperProduct,
+              loadDropshipperProducts,
+              "Dropshipper Products"
+            )}
           </>
         )}
 
         {tab === "discounts" && (
           <div className="space-y-8">
             <section className="rounded-2xl border border-[#f0e2ec] bg-white p-5 shadow-sm sm:p-7">
-              <h2 className="text-xl font-bold text-[#43243b]">
+              <h2 className="mb-6 text-xl font-bold text-[#43243b]">
                 {editingPromoId ? "Edit Promo Code" : "Create Promo Code"}
               </h2>
-              <p className="mb-6 mt-2 text-sm text-[#756574]">
-                Create promotional codes customers can enter when placing an
-                order. You can set the discount, minimum spend, dates and usage
-                limit.
-              </p>
 
               <form onSubmit={savePromoCode} className="grid gap-5 sm:grid-cols-2">
                 <div>
@@ -1640,9 +1672,6 @@ export default function AdminPage() {
                     className={inputStyle}
                     placeholder="e.g. ORAIA20"
                   />
-                  <p className="mt-1 text-xs text-[#756574]">
-                    Spaces are removed automatically.
-                  </p>
                 </div>
 
                 <div>
@@ -1652,56 +1681,37 @@ export default function AdminPage() {
                     onChange={(e) =>
                       setPromoForm({
                         ...promoForm,
-                        discount_type: e.target.value as
-                          | "percentage"
-                          | "fixed",
+                        discount_type: e.target.value as "percentage" | "fixed",
                       })
                     }
                     className={inputStyle}
                   >
-                    <option value="percentage">Percentage discount (%)</option>
+                    <option value="percentage">Percentage (%)</option>
                     <option value="fixed">Fixed amount (₦)</option>
                   </select>
                 </div>
 
                 <div>
-                  <label className={labelStyle}>
-                    {promoForm.discount_type === "percentage"
-                      ? "Discount Percentage"
-                      : "Discount Amount (₦)"}
-                  </label>
+                  <label className={labelStyle}>Discount Value</label>
                   <input
                     type="number"
                     min="0.01"
-                    max={
-                      promoForm.discount_type === "percentage"
-                        ? "100"
-                        : undefined
-                    }
                     step="0.01"
+                    max={promoForm.discount_type === "percentage" ? 100 : undefined}
                     value={promoForm.discount_value}
                     onChange={(e) =>
-                      setPromoForm({
-                        ...promoForm,
-                        discount_value: e.target.value,
-                      })
+                      setPromoForm({ ...promoForm, discount_value: e.target.value })
                     }
                     required
                     className={inputStyle}
-                    placeholder={
-                      promoForm.discount_type === "percentage" ? "20" : "2000"
-                    }
                   />
                 </div>
 
                 <div>
-                  <label className={labelStyle}>
-                    Minimum Order Amount (₦)
-                  </label>
+                  <label className={labelStyle}>Minimum Order Amount (₦)</label>
                   <input
                     type="number"
                     min="0"
-                    step="0.01"
                     value={promoForm.minimum_order_amount}
                     onChange={(e) =>
                       setPromoForm({
@@ -1719,16 +1729,10 @@ export default function AdminPage() {
                     type="datetime-local"
                     value={promoForm.starts_at}
                     onChange={(e) =>
-                      setPromoForm({
-                        ...promoForm,
-                        starts_at: e.target.value,
-                      })
+                      setPromoForm({ ...promoForm, starts_at: e.target.value })
                     }
                     className={inputStyle}
                   />
-                  <p className="mt-1 text-xs text-[#756574]">
-                    Leave blank to start immediately.
-                  </p>
                 </div>
 
                 <div>
@@ -1737,16 +1741,10 @@ export default function AdminPage() {
                     type="datetime-local"
                     value={promoForm.expires_at}
                     onChange={(e) =>
-                      setPromoForm({
-                        ...promoForm,
-                        expires_at: e.target.value,
-                      })
+                      setPromoForm({ ...promoForm, expires_at: e.target.value })
                     }
                     className={inputStyle}
                   />
-                  <p className="mt-1 text-xs text-[#756574]">
-                    Leave blank if the code has no expiry date.
-                  </p>
                 </div>
 
                 <div>
@@ -1754,40 +1752,28 @@ export default function AdminPage() {
                   <input
                     type="number"
                     min="1"
-                    step="1"
                     value={promoForm.usage_limit}
                     onChange={(e) =>
-                      setPromoForm({
-                        ...promoForm,
-                        usage_limit: e.target.value,
-                      })
+                      setPromoForm({ ...promoForm, usage_limit: e.target.value })
                     }
                     className={inputStyle}
-                    placeholder="e.g. 50"
+                    placeholder="Leave blank for unlimited"
                   />
-                  <p className="mt-1 text-xs text-[#756574]">
-                    Leave blank for unlimited uses.
-                  </p>
                 </div>
 
                 <div className="flex items-end gap-3">
                   <button
                     type="submit"
                     disabled={loading}
-                    className="rounded-xl bg-[#75436d] px-7 py-3 font-semibold text-white hover:bg-[#603657] disabled:opacity-50"
+                    className="rounded-xl bg-[#75436d] px-7 py-3 font-semibold text-white disabled:opacity-50"
                   >
-                    {loading
-                      ? "Saving..."
-                      : editingPromoId
-                        ? "Save Changes"
-                        : "Create Promo Code"}
+                    {loading ? "Saving..." : editingPromoId ? "Save Changes" : "Create Promo Code"}
                   </button>
-
                   {editingPromoId && (
                     <button
                       type="button"
                       onClick={resetPromoForm}
-                      className="rounded-xl border border-[#eadce6] px-5 py-3 text-sm text-[#43243b]"
+                      className="rounded-xl border border-[#eadce6] px-5 py-3"
                     >
                       Cancel
                     </button>
@@ -1798,18 +1784,12 @@ export default function AdminPage() {
 
             <section>
               <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-xl font-bold text-[#43243b]">
-                    Your Promo Codes ({promoCodes.length})
-                  </h2>
-                  <p className="mt-1 text-sm text-[#756574]">
-                    Manage your active and inactive promotional codes.
-                  </p>
-                </div>
-
+                <h2 className="text-xl font-bold text-[#43243b]">
+                  Your Promo Codes ({promoCodes.length})
+                </h2>
                 <button
                   onClick={loadPromoCodes}
-                  className="rounded-xl border border-[#eadce6] bg-white px-4 py-2 text-sm text-[#43243b]"
+                  className="rounded-xl border border-[#eadce6] bg-white px-4 py-2 text-sm"
                 >
                   Refresh
                 </button>
@@ -1823,13 +1803,11 @@ export default function AdminPage() {
                 <div className="grid gap-4 lg:grid-cols-2">
                   {promoCodes.map((promo) => {
                     const expired =
-                      promo.expires_at &&
+                      !!promo.expires_at &&
                       new Date(promo.expires_at).getTime() < Date.now();
-
                     const notStarted =
-                      promo.starts_at &&
+                      !!promo.starts_at &&
                       new Date(promo.starts_at).getTime() > Date.now();
-
                     const limitReached =
                       promo.usage_limit !== null &&
                       promo.usage_count >= promo.usage_limit;
@@ -1841,23 +1819,12 @@ export default function AdminPage() {
                       >
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div>
-                            <p className="text-xs uppercase tracking-wide text-[#756574]">
-                              Promo Code
-                            </p>
-                            <h3 className="mt-1 text-2xl font-bold tracking-wide text-[#43243b]">
+                            <p className="text-xs uppercase text-[#756574]">Promo Code</p>
+                            <h3 className="mt-1 text-2xl font-bold text-[#43243b]">
                               {promo.code}
                             </h3>
                           </div>
-
-                          <span
-                            className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                              !promo.is_active
-                                ? "bg-gray-100 text-gray-600"
-                                : expired || notStarted || limitReached
-                                  ? "bg-amber-100 text-amber-800"
-                                  : "bg-green-100 text-green-800"
-                            }`}
-                          >
+                          <span className="rounded-full bg-[#f9edf5] px-3 py-1 text-xs font-semibold text-[#75436d]">
                             {!promo.is_active
                               ? "Inactive"
                               : expired
@@ -1881,55 +1848,41 @@ export default function AdminPage() {
 
                         <div className="grid gap-3 text-sm sm:grid-cols-2">
                           <p>
-                            <span className="text-[#756574]">Minimum spend:</span>
-                            <br />
-                            <strong>{money(promo.minimum_order_amount)}</strong>
+                            Minimum spend: <strong>{money(promo.minimum_order_amount)}</strong>
                           </p>
                           <p>
-                            <span className="text-[#756574]">Usage:</span>
-                            <br />
-                            <strong>
-                              {promo.usage_count}
-                              {" / "}
-                              {promo.usage_limit ?? "Unlimited"}
-                            </strong>
+                            Usage: <strong>{promo.usage_count} / {promo.usage_limit ?? "Unlimited"}</strong>
                           </p>
                           <p>
-                            <span className="text-[#756574]">Starts:</span>
-                            <br />
-                            <strong>{dateTimeText(promo.starts_at)}</strong>
+                            Starts: <strong>{dateTimeText(promo.starts_at)}</strong>
                           </p>
                           <p>
-                            <span className="text-[#756574]">Expires:</span>
-                            <br />
-                            <strong>{dateTimeText(promo.expires_at)}</strong>
+                            Expires: <strong>{dateTimeText(promo.expires_at)}</strong>
                           </p>
                         </div>
 
                         <div className="mt-5 flex flex-wrap gap-2 border-t border-[#f0e2ec] pt-4">
                           <button
                             onClick={() => editPromo(promo)}
-                            className="rounded-lg bg-[#75436d] px-4 py-2 text-sm font-semibold text-white"
+                            className="rounded-lg bg-[#75436d] px-4 py-2 text-sm text-white"
                           >
                             Edit
                           </button>
                           <button
                             onClick={() => togglePromo(promo)}
-                            disabled={loading}
-                            className="rounded-lg border border-[#eadce6] px-4 py-2 text-sm text-[#43243b] disabled:opacity-50"
+                            className="rounded-lg border border-[#eadce6] px-4 py-2 text-sm"
                           >
                             {promo.is_active ? "Deactivate" : "Activate"}
                           </button>
                           <button
                             onClick={() => deletePromo(promo)}
-                            disabled={loading}
-                            className="rounded-lg border border-red-300 px-4 py-2 text-sm text-red-600 disabled:opacity-50"
+                            className="rounded-lg border border-red-300 px-4 py-2 text-sm text-red-600"
                           >
                             Delete
                           </button>
                           <button
-                            onClick={() => GenUIcopyPromo(promo.code)}
-                            className="rounded-lg border border-[#eadce6] px-4 py-2 text-sm text-[#43243b]"
+                            onClick={() => copyPromo(promo.code)}
+                            className="rounded-lg border border-[#eadce6] px-4 py-2 text-sm"
                           >
                             Copy Code
                           </button>
@@ -1950,14 +1903,12 @@ export default function AdminPage() {
                 Create Customer Order
               </h2>
               <p className="mb-6 text-sm text-[#756574]">
-                Select a customer and add one or more products to their order.
-                Product discounts are included automatically.
+                Only normal customer products are available in this order form.
               </p>
 
               {customers.length === 0 ? (
                 <p className="rounded-xl bg-[#fff8fc] p-4 text-sm text-[#756574]">
-                  No customer profiles found yet. Customers need to have a
-                  profile before you can create an order for them.
+                  No customer profiles found yet.
                 </p>
               ) : (
                 <form onSubmit={createOrder} className="space-y-5">
@@ -1980,126 +1931,95 @@ export default function AdminPage() {
                   </div>
 
                   <div>
-                    <div className="mb-3 flex items-center justify-between gap-3">
+                    <div className="mb-3 flex items-center justify-between">
                       <h3 className="font-semibold text-[#43243b]">
                         Products in this order
                       </h3>
                       <button
                         type="button"
-                        onClick={addOrderLine}
-                        className="text-sm font-semibold text-[#75436d] hover:underline"
+                        onClick={() =>
+                          setOrderLines((old) => [
+                            ...old,
+                            { product_id: "", quantity: "1" },
+                          ])
+                        }
+                        className="text-sm font-semibold text-[#75436d]"
                       >
                         + Add another product
                       </button>
                     </div>
 
                     <div className="space-y-3">
-                      {orderLines.map((line, index) => {
-                        const selectedProduct = products.find(
-                          (product) => product.id === line.product_id
-                        );
-
-                        return (
-                          <div
-                            key={index}
-                            className="grid gap-3 rounded-xl border border-[#f0e2ec] p-4 sm:grid-cols-[1fr_120px_auto]"
-                          >
-                            <div>
-                              <label className={labelStyle}>Product</label>
-                              <select
-                                value={line.product_id}
-                                onChange={(e) =>
-                                  updateOrderLine(
-                                    index,
-                                    "product_id",
-                                    e.target.value
-                                  )
-                                }
-                                required
-                                className={inputStyle}
-                              >
-                                <option value="">Select a product</option>
-                                {products.map((product) => (
-                                  <option
-                                    key={product.id}
-                                    value={product.id}
-                                    disabled={!product.is_active}
-                                  >
-                                    {product.name} ·{" "}
-                                    {money(discountedPrice(product))}
-                                    {!product.is_active ? " (Hidden)" : ""}
-                                  </option>
-                                ))}
-                              </select>
-
-                              {selectedProduct && (
-                                <div className="mt-1 text-xs text-[#756574]">
-                                  {selectedProduct.discount_percent > 0 ? (
-                                    <>
-                                      <span className="line-through">
-                                        {money(selectedProduct.price)}
-                                      </span>
-                                      {"  "}
-                                      <strong className="text-green-700">
-                                        {money(discountedPrice(selectedProduct))}
-                                      </strong>
-                                      {"  "}
-                                      ({selectedProduct.discount_percent}% off)
-                                    </>
-                                  ) : (
-                                    <>Unit price: {money(selectedProduct.price)}</>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-
-                            <div>
-                              <label className={labelStyle}>Quantity</label>
-                              <input
-                                type="number"
-                                min="1"
-                                value={line.quantity}
-                                onChange={(e) =>
-                                  updateOrderLine(
-                                    index,
-                                    "quantity",
-                                    e.target.value
-                                  )
-                                }
-                                required
-                                className={inputStyle}
-                              />
-                            </div>
-
-                            <div className="flex items-end">
-                              <button
-                                type="button"
-                                onClick={() => removeOrderLine(index)}
-                                disabled={orderLines.length === 1}
-                                className="rounded-xl border border-red-200 px-4 py-3 text-sm text-red-600 disabled:opacity-30"
-                              >
-                                Remove
-                              </button>
-                            </div>
+                      {orderLines.map((line, index) => (
+                        <div
+                          key={index}
+                          className="grid gap-3 rounded-xl border border-[#f0e2ec] p-4 sm:grid-cols-[1fr_120px_auto]"
+                        >
+                          <div>
+                            <label className={labelStyle}>Product</label>
+                            <select
+                              value={line.product_id}
+                              onChange={(e) =>
+                                updateOrderLine(index, "product_id", e.target.value)
+                              }
+                              required
+                              className={inputStyle}
+                            >
+                              <option value="">Select a product</option>
+                              {products.map((product) => (
+                                <option
+                                  key={product.id}
+                                  value={product.id}
+                                  disabled={!product.is_active}
+                                >
+                                  {product.name} · {money(discountedPrice(product))}
+                                </option>
+                              ))}
+                            </select>
                           </div>
-                        );
-                      })}
+
+                          <div>
+                            <label className={labelStyle}>Quantity</label>
+                            <input
+                              type="number"
+                              min="1"
+                              value={line.quantity}
+                              onChange={(e) =>
+                                updateOrderLine(index, "quantity", e.target.value)
+                              }
+                              required
+                              className={inputStyle}
+                            />
+                          </div>
+
+                          <div className="flex items-end">
+                            <button
+                              type="button"
+                              disabled={orderLines.length === 1}
+                              onClick={() =>
+                                setOrderLines((old) =>
+                                  old.length === 1 ? old : old.filter((_, i) => i !== index)
+                                )
+                              }
+                              className="rounded-xl border border-red-200 px-4 py-3 text-sm text-red-600 disabled:opacity-30"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
 
-                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-[#f9edf5] p-4">
-                    <span className="font-semibold text-[#43243b]">
-                      Order Total
-                    </span>
-                    <span className="text-xl font-bold text-[#43243b]">
-                      {money(orderTotal)}
-                    </span>
+                  <div className="flex justify-between rounded-xl bg-[#f9edf5] p-4">
+                    <span className="font-semibold">Order Total</span>
+                    <span className="text-xl font-bold">{money(orderTotal)}</span>
                   </div>
 
                   <button
                     type="submit"
                     disabled={loading || products.length === 0}
-                    className="rounded-xl bg-[#75436d] px-7 py-3 font-semibold text-white hover:bg-[#603657] disabled:opacity-50"
+                    className="rounded-xl bg-[#75436d] px-7 py-3 font-semibold text-white disabled:opacity-50"
                   >
                     {loading ? "Creating Order..." : "Create Order"}
                   </button>
@@ -2114,7 +2034,7 @@ export default function AdminPage() {
                 </h2>
                 <button
                   onClick={loadOrders}
-                  className="rounded-xl border border-[#eadce6] bg-white px-4 py-2 text-sm text-[#43243b]"
+                  className="rounded-xl border border-[#eadce6] bg-white px-4 py-2 text-sm"
                 >
                   Refresh Orders
                 </button>
@@ -2137,9 +2057,7 @@ export default function AdminPage() {
                           <h3 className="mt-1 font-bold text-[#43243b]">
                             {order.order_number}
                           </h3>
-                          <p className="mt-2 text-sm text-[#493a49]">
-                            {customerName(order.user_id)}
-                          </p>
+                          <p className="mt-2 text-sm">{customerName(order.user_id)}</p>
                           <p className="text-xs text-[#756574]">
                             {customerEmail(order.user_id)}
                           </p>
@@ -2147,24 +2065,15 @@ export default function AdminPage() {
                             {dateText(order.created_at)}
                           </p>
                         </div>
-
                         <div className="text-right">
-                          <p className="text-lg font-bold text-[#43243b]">
+                          <p className="text-lg font-bold">
                             {money(order.total_amount, order.currency)}
                           </p>
                           <div className="mt-2 flex flex-wrap justify-end gap-2">
-                            <span
-                              className={`rounded-full px-3 py-1 text-xs font-semibold ${statusClass(
-                                order.order_status
-                              )}`}
-                            >
+                            <span className={`rounded-full px-3 py-1 text-xs ${statusClass(order.order_status)}`}>
                               {order.order_status}
                             </span>
-                            <span
-                              className={`rounded-full px-3 py-1 text-xs font-semibold ${statusClass(
-                                order.payment_status
-                              )}`}
-                            >
+                            <span className={`rounded-full px-3 py-1 text-xs ${statusClass(order.payment_status)}`}>
                               {order.payment_status}
                             </span>
                           </div>
@@ -2173,40 +2082,21 @@ export default function AdminPage() {
 
                       <div className="my-4 space-y-2 border-y border-[#f0e2ec] py-4">
                         {itemsFor(order.id).map((item) => (
-                          <div
-                            key={item.id}
-                            className="flex flex-wrap justify-between gap-2 text-sm"
-                          >
-                            <span className="text-[#493a49]">
-                              {item.product_name} × {item.quantity}
-                            </span>
-                            <span className="font-semibold text-[#43243b]">
-                              {money(item.total_price, order.currency)}
-                            </span>
+                          <div key={item.id} className="flex justify-between gap-2 text-sm">
+                            <span>{item.product_name} × {item.quantity}</span>
+                            <strong>{money(item.total_price, order.currency)}</strong>
                           </div>
                         ))}
                       </div>
 
                       <div className="mb-4 rounded-xl bg-[#f9edf5] p-4">
-                        <p className="text-sm text-[#756574]">
-                          Customer Shipping Fee
+                        <p className="text-sm text-[#756574]">Customer Shipping Fee</p>
+                        <p className="mt-1 text-xl font-bold">
+                          {money(Number(order.shipping_fee || 0), order.currency)}
                         </p>
-
-                        <p className="mt-1 text-xl font-bold text-[#43243b]">
-                          {money(
-                            Number(order.shipping_fee || 0),
-                            order.currency
-                          )}
-                        </p>
-
-                        <span
-                          className={`mt-2 inline-block rounded-full px-3 py-1 text-xs font-semibold ${statusClass(
-                            order.shipping_payment_status
-                          )}`}
-                        >
+                        <span className={`mt-2 inline-block rounded-full px-3 py-1 text-xs ${statusClass(order.shipping_payment_status)}`}>
                           {order.shipping_payment_status || "Not required"}
                         </span>
-
                         {order.shipping_paid_at && (
                           <p className="mt-2 text-xs text-[#756574]">
                             Paid on: {dateTimeText(order.shipping_paid_at)}
@@ -2215,50 +2105,15 @@ export default function AdminPage() {
                       </div>
 
                       <div className="grid gap-3 text-sm sm:grid-cols-3">
-                        <p>
-                          <span className="text-[#756574]">Shipping: </span>
-                          <strong className="text-[#43243b]">
-                            {order.shipping_status || "Not shipped"}
-                          </strong>
-                        </p>
-                        <p>
-                          <span className="text-[#756574]">Carrier: </span>
-                          <strong className="text-[#43243b]">
-                            {order.shipping_carrier || "Not assigned"}
-                          </strong>
-                        </p>
-                        <p>
-                          <span className="text-[#756574]">Tracking: </span>
-                          <strong className="break-all text-[#43243b]">
-                            {order.tracking_number || "Not available"}
-                          </strong>
-                        </p>
+                        <p>Shipping: <strong>{order.shipping_status || "Not shipped"}</strong></p>
+                        <p>Carrier: <strong>{order.shipping_carrier || "Not assigned"}</strong></p>
+                        <p>Tracking: <strong>{order.tracking_number || "Not available"}</strong></p>
                       </div>
 
-                      {(order.shipping_dispatch_date ||
-                        order.shipping_estimated_delivery) && (
+                      {(order.shipping_dispatch_date || order.shipping_estimated_delivery) && (
                         <div className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
-                          {order.shipping_dispatch_date && (
-                            <p>
-                              <span className="text-[#756574]">
-                                Dispatch Date:{" "}
-                              </span>
-                              <strong className="text-[#43243b]">
-                                {dateText(order.shipping_dispatch_date)}
-                              </strong>
-                            </p>
-                          )}
-
-                          {order.shipping_estimated_delivery && (
-                            <p>
-                              <span className="text-[#756574]">
-                                Estimated Delivery:{" "}
-                              </span>
-                              <strong className="text-[#43243b]">
-                                {dateText(order.shipping_estimated_delivery)}
-                              </strong>
-                            </p>
-                          )}
+                          <p>Dispatch Date: <strong>{dateText(order.shipping_dispatch_date)}</strong></p>
+                          <p>Estimated Delivery: <strong>{dateText(order.shipping_estimated_delivery)}</strong></p>
                         </div>
                       )}
 
@@ -2274,7 +2129,7 @@ export default function AdminPage() {
                       )}
 
                       {order.shipping_notes && (
-                        <p className="mt-3 rounded-lg bg-[#fff8fc] p-3 text-sm text-[#493a49]">
+                        <p className="mt-3 rounded-lg bg-[#fff8fc] p-3 text-sm">
                           {order.shipping_notes}
                         </p>
                       )}
@@ -2282,19 +2137,28 @@ export default function AdminPage() {
                       <div className="mt-5 flex flex-wrap gap-2 border-t border-[#f0e2ec] pt-4">
                         <button
                           onClick={() => openOrderEditor(order)}
-                          className="rounded-lg bg-[#75436d] px-4 py-2 text-sm font-semibold text-white"
+                          className="rounded-lg bg-[#75436d] px-4 py-2 text-sm text-white"
                         >
                           Update Order
                         </button>
                         <button
-                          onClick={() => openInvoiceForm(order)}
-                          className="rounded-lg border border-[#75436d] px-4 py-2 text-sm font-semibold text-[#75436d]"
+                          onClick={() => {
+                            setInvoiceOrder(order);
+                            setInvoiceDueDate("");
+                          }}
+                          className="rounded-lg border border-[#75436d] px-4 py-2 text-sm text-[#75436d]"
                         >
                           Create Invoice
                         </button>
                         <button
-                          onClick={() => openReceiptForm(order)}
-                          className="rounded-lg border border-green-600 px-4 py-2 text-sm font-semibold text-green-700"
+                          onClick={() => {
+                            setReceiptOrder(order);
+                            setReceiptAmount(String(order.total_amount));
+                            setReceiptMethod("Bank Transfer");
+                            setReceiptReference("");
+                            setReceiptNotes("");
+                          }}
+                          className="rounded-lg border border-green-600 px-4 py-2 text-sm text-green-700"
                         >
                           Record Payment / Receipt
                         </button>
@@ -2320,7 +2184,7 @@ export default function AdminPage() {
               </div>
               <button
                 onClick={loadInvoices}
-                className="rounded-xl border border-[#eadce6] bg-white px-4 py-2 text-sm text-[#43243b]"
+                className="rounded-xl border border-[#eadce6] bg-white px-4 py-2 text-sm"
               >
                 Refresh
               </button>
@@ -2328,8 +2192,7 @@ export default function AdminPage() {
 
             {invoices.length === 0 ? (
               <div className="rounded-2xl bg-white p-8 text-center text-sm text-[#756574]">
-                No invoices created yet. You can create an invoice from an
-                order.
+                No invoices created yet. You can create an invoice from an order.
               </div>
             ) : (
               <div className="space-y-4">
@@ -2344,22 +2207,12 @@ export default function AdminPage() {
                         <h3 className="mt-1 font-bold text-[#43243b]">
                           {invoice.invoice_number}
                         </h3>
-                        <p className="mt-2 text-sm text-[#493a49]">
-                          {customerName(invoice.user_id)}
-                        </p>
-                        <p className="text-xs text-[#756574]">
-                          {customerEmail(invoice.user_id)}
-                        </p>
+                        <p className="mt-2 text-sm">{customerName(invoice.user_id)}</p>
+                        <p className="text-xs text-[#756574]">{customerEmail(invoice.user_id)}</p>
                       </div>
                       <div className="text-right">
-                        <p className="text-lg font-bold text-[#43243b]">
-                          {money(invoice.amount)}
-                        </p>
-                        <span
-                          className={`mt-2 inline-block rounded-full px-3 py-1 text-xs font-semibold ${statusClass(
-                            invoice.payment_status
-                          )}`}
-                        >
+                        <p className="text-lg font-bold">{money(invoice.amount)}</p>
+                        <span className={`mt-2 inline-block rounded-full px-3 py-1 text-xs ${statusClass(invoice.payment_status)}`}>
                           {invoice.payment_status}
                         </span>
                       </div>
@@ -2367,23 +2220,13 @@ export default function AdminPage() {
 
                     <div className="mt-4 grid gap-3 border-t border-[#f0e2ec] pt-4 text-sm sm:grid-cols-3">
                       <p>
-                        <span className="text-[#756574]">Order: </span>
-                        <strong className="text-[#43243b]">
-                          {orderFor(invoice.order_id)?.order_number ||
-                            "Not linked"}
-                        </strong>
+                        Order: <strong>{orders.find((o) => o.id === invoice.order_id)?.order_number || "Not linked"}</strong>
                       </p>
                       <p>
-                        <span className="text-[#756574]">Invoice type: </span>
-                        <strong className="text-[#43243b]">
-                          {invoice.invoice_type || "Order Invoice"}
-                        </strong>
+                        Invoice type: <strong>{invoice.invoice_type || "Order Invoice"}</strong>
                       </p>
                       <p>
-                        <span className="text-[#756574]">Due date: </span>
-                        <strong className="text-[#43243b]">
-                          {dateText(invoice.due_date)}
-                        </strong>
+                        Due date: <strong>{dateText(invoice.due_date)}</strong>
                       </p>
                     </div>
 
@@ -2391,7 +2234,7 @@ export default function AdminPage() {
                       onClick={printDocument}
                       className="mt-4 rounded-lg border border-[#75436d] px-4 py-2 text-sm font-semibold text-[#75436d]"
                     >
-                      Print / Save Invoices
+                      Print / Save Invoice
                     </button>
                   </article>
                 ))}
@@ -2413,7 +2256,7 @@ export default function AdminPage() {
               </div>
               <button
                 onClick={loadReceipts}
-                className="rounded-xl border border-[#eadce6] bg-white px-4 py-2 text-sm text-[#43243b]"
+                className="rounded-xl border border-[#eadce6] bg-white px-4 py-2 text-sm"
               >
                 Refresh
               </button>
@@ -2421,8 +2264,7 @@ export default function AdminPage() {
 
             {receipts.length === 0 ? (
               <div className="rounded-2xl bg-white p-8 text-center text-sm text-[#756574]">
-                No receipts recorded yet. Record a payment from the Orders
-                section.
+                No receipts recorded yet. Record a payment from the Orders section.
               </div>
             ) : (
               <div className="space-y-4">
@@ -2437,18 +2279,12 @@ export default function AdminPage() {
                         <h3 className="mt-1 font-bold text-[#43243b]">
                           {receipt.receipt_number}
                         </h3>
-                        <p className="mt-2 text-sm text-[#493a49]">
-                          {customerName(receipt.user_id)}
-                        </p>
-                        <p className="text-xs text-[#756574]">
-                          {customerEmail(receipt.user_id)}
-                        </p>
+                        <p className="mt-2 text-sm">{customerName(receipt.user_id)}</p>
+                        <p className="text-xs text-[#756574]">{customerEmail(receipt.user_id)}</p>
                       </div>
                       <div className="text-right">
-                        <p className="text-lg font-bold text-[#43243b]">
-                          {money(receipt.amount)}
-                        </p>
-                        <span className="mt-2 inline-block rounded-full bg-green-100 px-3 py-1 text-xs font-semibold text-green-800">
+                        <p className="text-lg font-bold">{money(receipt.amount)}</p>
+                        <span className="mt-2 inline-block rounded-full bg-green-100 px-3 py-1 text-xs text-green-800">
                           Payment Received
                         </span>
                       </div>
@@ -2456,34 +2292,15 @@ export default function AdminPage() {
 
                     <div className="mt-4 grid gap-3 border-t border-[#f0e2ec] pt-4 text-sm sm:grid-cols-2">
                       <p>
-                        <span className="text-[#756574]">Order: </span>
-                        <strong className="text-[#43243b]">
-                          {orderFor(receipt.order_id)?.order_number ||
-                            "Not linked"}
-                        </strong>
+                        Order: <strong>{orders.find((o) => o.id === receipt.order_id)?.order_number || "Not linked"}</strong>
                       </p>
-                      <p>
-                        <span className="text-[#756574]">Date: </span>
-                        <strong className="text-[#43243b]">
-                          {dateText(receipt.created_at)}
-                        </strong>
-                      </p>
-                      <p>
-                        <span className="text-[#756574]">Method: </span>
-                        <strong className="text-[#43243b]">
-                          {receipt.payment_method || "Not specified"}
-                        </strong>
-                      </p>
-                      <p>
-                        <span className="text-[#756574]">Reference: </span>
-                        <strong className="break-all text-[#43243b]">
-                          {receipt.payment_reference || "Not provided"}
-                        </strong>
-                      </p>
+                      <p>Date: <strong>{dateText(receipt.created_at)}</strong></p>
+                      <p>Method: <strong>{receipt.payment_method || "Not specified"}</strong></p>
+                      <p>Reference: <strong>{receipt.payment_reference || "Not provided"}</strong></p>
                     </div>
 
                     {receipt.notes && (
-                      <p className="mt-3 rounded-lg bg-[#fff8fc] p-3 text-sm text-[#493a49]">
+                      <p className="mt-3 rounded-lg bg-[#fff8fc] p-3 text-sm">
                         {receipt.notes}
                       </p>
                     )}
@@ -2517,44 +2334,24 @@ export default function AdminPage() {
 
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="sm:col-span-2 rounded-xl border border-[#eadce6] bg-[#fff8fc] p-4">
-                <label className={labelStyle}>
-                  Customer Shipping Fee (₦)
-                </label>
-
+                <label className={labelStyle}>Customer Shipping Fee (₦)</label>
                 <input
                   type="number"
                   min="0"
                   step="0.01"
                   className={inputStyle}
                   value={orderUpdate.shipping_fee}
-                  disabled={
-                    editingOrder.shipping_payment_status === "Paid"
-                  }
+                  disabled={editingOrder.shipping_payment_status === "Paid"}
                   onChange={(e) =>
-                    setOrderUpdate({
-                      ...orderUpdate,
-                      shipping_fee: e.target.value,
-                    })
+                    setOrderUpdate({ ...orderUpdate, shipping_fee: e.target.value })
                   }
-                  placeholder="Enter shipping fee"
                 />
-
                 <p className="mt-2 text-xs text-[#756574]">
-                  Enter the shipping amount the customer needs to pay
-                  separately. The customer will see this amount in their
-                  account.
+                  The customer will see this shipping amount in their account.
                 </p>
-
-                <p className="mt-2 text-sm font-semibold text-[#43243b]">
-                  Shipping Payment Status:{" "}
-                  {editingOrder.shipping_payment_status || "Not required"}
+                <p className="mt-2 text-sm font-semibold">
+                  Shipping Payment Status: {editingOrder.shipping_payment_status || "Not required"}
                 </p>
-
-                {editingOrder.shipping_payment_status === "Paid" && (
-                  <p className="mt-1 text-xs text-green-700">
-                    This shipping fee has already been paid.
-                  </p>
-                )}
               </div>
 
               <div>
@@ -2562,21 +2359,10 @@ export default function AdminPage() {
                 <select
                   className={inputStyle}
                   value={orderUpdate.order_status}
-                  onChange={(e) =>
-                    setOrderUpdate({
-                      ...orderUpdate,
-                      order_status: e.target.value,
-                    })
-                  }
+                  onChange={(e) => setOrderUpdate({ ...orderUpdate, order_status: e.target.value })}
                 >
-                  {[
-                    "Pending",
-                    "Confirmed",
-                    "Processing",
-                    "Completed",
-                    "Cancelled",
-                  ].map((status) => (
-                    <option key={status}>{status}</option>
+                  {["Pending", "Confirmed", "Processing", "Completed", "Cancelled"].map((s) => (
+                    <option key={s}>{s}</option>
                   ))}
                 </select>
               </div>
@@ -2586,21 +2372,10 @@ export default function AdminPage() {
                 <select
                   className={inputStyle}
                   value={orderUpdate.payment_status}
-                  onChange={(e) =>
-                    setOrderUpdate({
-                      ...orderUpdate,
-                      payment_status: e.target.value,
-                    })
-                  }
+                  onChange={(e) => setOrderUpdate({ ...orderUpdate, payment_status: e.target.value })}
                 >
-                  {[
-                    "Pending",
-                    "Partially paid",
-                    "Paid",
-                    "Failed",
-                    "Refunded",
-                  ].map((status) => (
-                    <option key={status}>{status}</option>
+                  {["Pending", "Partially paid", "Paid", "Failed", "Refunded"].map((s) => (
+                    <option key={s}>{s}</option>
                   ))}
                 </select>
               </div>
@@ -2610,12 +2385,7 @@ export default function AdminPage() {
                 <select
                   className={inputStyle}
                   value={orderUpdate.shipping_status}
-                  onChange={(e) =>
-                    setOrderUpdate({
-                      ...orderUpdate,
-                      shipping_status: e.target.value,
-                    })
-                  }
+                  onChange={(e) => setOrderUpdate({ ...orderUpdate, shipping_status: e.target.value })}
                 >
                   {[
                     "Not shipped",
@@ -2626,8 +2396,8 @@ export default function AdminPage() {
                     "Out for delivery",
                     "Delivered",
                     "Delivery delayed",
-                  ].map((status) => (
-                    <option key={status}>{status}</option>
+                  ].map((s) => (
+                    <option key={s}>{s}</option>
                   ))}
                 </select>
               </div>
@@ -2637,12 +2407,7 @@ export default function AdminPage() {
                 <input
                   className={inputStyle}
                   value={orderUpdate.shipping_carrier}
-                  onChange={(e) =>
-                    setOrderUpdate({
-                      ...orderUpdate,
-                      shipping_carrier: e.target.value,
-                    })
-                  }
+                  onChange={(e) => setOrderUpdate({ ...orderUpdate, shipping_carrier: e.target.value })}
                   placeholder="e.g. Skycargo"
                 />
               </div>
@@ -2652,13 +2417,7 @@ export default function AdminPage() {
                 <input
                   className={inputStyle}
                   value={orderUpdate.tracking_number}
-                  onChange={(e) =>
-                    setOrderUpdate({
-                      ...orderUpdate,
-                      tracking_number: e.target.value,
-                    })
-                  }
-                  placeholder="Enter tracking number"
+                  onChange={(e) => setOrderUpdate({ ...orderUpdate, tracking_number: e.target.value })}
                 />
               </div>
 
@@ -2668,18 +2427,9 @@ export default function AdminPage() {
                   type="url"
                   className={inputStyle}
                   value={orderUpdate.shipping_tracking_url}
-                  onChange={(e) =>
-                    setOrderUpdate({
-                      ...orderUpdate,
-                      shipping_tracking_url: e.target.value,
-                    })
-                  }
+                  onChange={(e) => setOrderUpdate({ ...orderUpdate, shipping_tracking_url: e.target.value })}
                   placeholder="https://example.com/track"
                 />
-                <p className="mt-1 text-xs text-[#756574]">
-                  Paste the carrier's tracking page link. Customers can open
-                  this link from their account.
-                </p>
               </div>
 
               <div>
@@ -2688,12 +2438,7 @@ export default function AdminPage() {
                   type="date"
                   className={inputStyle}
                   value={orderUpdate.shipping_dispatch_date}
-                  onChange={(e) =>
-                    setOrderUpdate({
-                      ...orderUpdate,
-                      shipping_dispatch_date: e.target.value,
-                    })
-                  }
+                  onChange={(e) => setOrderUpdate({ ...orderUpdate, shipping_dispatch_date: e.target.value })}
                 />
               </div>
 
@@ -2703,12 +2448,7 @@ export default function AdminPage() {
                   type="date"
                   className={inputStyle}
                   value={orderUpdate.shipping_estimated_delivery}
-                  onChange={(e) =>
-                    setOrderUpdate({
-                      ...orderUpdate,
-                      shipping_estimated_delivery: e.target.value,
-                    })
-                  }
+                  onChange={(e) => setOrderUpdate({ ...orderUpdate, shipping_estimated_delivery: e.target.value })}
                 />
               </div>
 
@@ -2718,12 +2458,7 @@ export default function AdminPage() {
                   className={inputStyle}
                   rows={3}
                   value={orderUpdate.shipping_notes}
-                  onChange={(e) =>
-                    setOrderUpdate({
-                      ...orderUpdate,
-                      shipping_notes: e.target.value,
-                    })
-                  }
+                  onChange={(e) => setOrderUpdate({ ...orderUpdate, shipping_notes: e.target.value })}
                   placeholder="Write an update for the customer..."
                 />
               </div>
@@ -2740,7 +2475,7 @@ export default function AdminPage() {
               <button
                 type="button"
                 onClick={() => setEditingOrder(null)}
-                className="rounded-xl border border-[#eadce6] px-6 py-3 text-[#43243b]"
+                className="rounded-xl border border-[#eadce6] px-6 py-3"
               >
                 Cancel
               </button>
@@ -2755,18 +2490,14 @@ export default function AdminPage() {
             onSubmit={createInvoice}
             className="my-8 w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl"
           >
-            <h2 className="text-xl font-bold text-[#43243b]">
-              Create Invoice
-            </h2>
+            <h2 className="text-xl font-bold text-[#43243b]">Create Invoice</h2>
             <p className="mt-2 text-sm text-[#756574]">
               {invoiceOrder.order_number} · {customerName(invoiceOrder.user_id)}
             </p>
 
             <div className="my-5 rounded-xl bg-[#f9edf5] p-4">
               <p className="text-sm text-[#756574]">Invoice Amount</p>
-              <p className="mt-1 text-2xl font-bold text-[#43243b]">
-                {money(invoiceOrder.total_amount)}
-              </p>
+              <p className="mt-1 text-2xl font-bold">{money(invoiceOrder.total_amount)}</p>
             </div>
 
             <label className={labelStyle}>Payment Due Date</label>
@@ -2781,14 +2512,14 @@ export default function AdminPage() {
               <button
                 type="submit"
                 disabled={loading}
-                className="rounded-xl bg-[#75436d] px-6 py-3 font-semibold text-white disabled:opacity-50"
+                className="rounded-xl bg-[#75436d] px-6 py-3 font-semibold text-white"
               >
                 {loading ? "Creating..." : "Generate Invoice"}
               </button>
               <button
                 type="button"
                 onClick={() => setInvoiceOrder(null)}
-                className="rounded-xl border border-[#eadce6] px-6 py-3 text-[#43243b]"
+                className="rounded-xl border border-[#eadce6] px-6 py-3"
               >
                 Cancel
               </button>
@@ -2812,9 +2543,7 @@ export default function AdminPage() {
 
             <div className="my-5 rounded-xl bg-[#f9edf5] p-4">
               <p className="text-sm text-[#756574]">Order Total</p>
-              <p className="mt-1 text-xl font-bold text-[#43243b]">
-                {money(receiptOrder.total_amount)}
-              </p>
+              <p className="mt-1 text-xl font-bold">{money(receiptOrder.total_amount)}</p>
             </div>
 
             <div className="space-y-4">
@@ -2838,13 +2567,7 @@ export default function AdminPage() {
                   value={receiptMethod}
                   onChange={(e) => setReceiptMethod(e.target.value)}
                 >
-                  {[
-                    "Bank Transfer",
-                    "Paystack",
-                    "Card",
-                    "Cash",
-                    "Other",
-                  ].map((method) => (
+                  {["Bank Transfer", "Paystack", "Card", "Cash", "Other"].map((method) => (
                     <option key={method}>{method}</option>
                   ))}
                 </select>
@@ -2876,14 +2599,14 @@ export default function AdminPage() {
               <button
                 type="submit"
                 disabled={loading}
-                className="rounded-xl bg-[#75436d] px-6 py-3 font-semibold text-white disabled:opacity-50"
+                className="rounded-xl bg-[#75436d] px-6 py-3 font-semibold text-white"
               >
                 {loading ? "Saving..." : "Confirm Payment & Create Receipt"}
               </button>
               <button
                 type="button"
                 onClick={() => setReceiptOrder(null)}
-                className="rounded-xl border border-[#eadce6] px-6 py-3 text-[#43243b]"
+                className="rounded-xl border border-[#eadce6] px-6 py-3"
               >
                 Cancel
               </button>
@@ -2893,14 +2616,4 @@ export default function AdminPage() {
       )}
     </main>
   );
-}
-
-function GenUIcopyPromo(code: string) {
-  if (typeof navigator !== "undefined" && navigator.clipboard) {
-    navigator.clipboard.writeText(code).catch(() => {
-      window.prompt("Copy this promo code:", code);
-    });
-  } else if (typeof window !== "undefined") {
-    window.prompt("Copy this promo code:", code);
-  }
 }
