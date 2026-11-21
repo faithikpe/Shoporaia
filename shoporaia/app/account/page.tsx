@@ -55,6 +55,9 @@ type CustomerOrder = {
   tracking_number: string | null;
   shipping_carrier: string | null;
   shipping_notes: string | null;
+  shipping_tracking_url?: string | null;
+  shipping_dispatch_date?: string | null;
+  shipping_estimated_delivery?: string | null;
   subtotal: number;
   total_amount: number;
   currency: string | null;
@@ -136,7 +139,11 @@ function formatMoney(amount: number, currency = "NGN") {
 function formatDate(date: string | null | undefined) {
   if (!date) return "Not available";
 
-  return new Date(date).toLocaleDateString("en-NG", {
+  const parsed = new Date(date);
+
+  if (Number.isNaN(parsed.getTime())) return "Not available";
+
+  return parsed.toLocaleDateString("en-NG", {
     day: "numeric",
     month: "short",
     year: "numeric",
@@ -208,8 +215,10 @@ export default function AccountPage() {
   });
 
   const [addresses, setAddresses] = useState<CustomerAddress[]>([]);
-  const [addressForm, setAddressForm] = useState<AddressForm>(emptyAddress);
-  const [editingAddressId, setEditingAddressId] = useState<string | null>(null);
+  const [addressForm, setAddressForm] =
+    useState<AddressForm>(emptyAddress);
+  const [editingAddressId, setEditingAddressId] =
+    useState<string | null>(null);
   const [showAddressForm, setShowAddressForm] = useState(false);
 
   const [orders, setOrders] = useState<CustomerOrder[]>([]);
@@ -219,7 +228,8 @@ export default function AccountPage() {
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [payingOrderId, setPayingOrderId] = useState<string | null>(null);
+  const [payingOrderId, setPayingOrderId] =
+    useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
@@ -227,174 +237,144 @@ export default function AccountPage() {
     setLoading(true);
     setError("");
 
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
+    try {
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser();
 
-    if (authError || !user || !user.email_confirmed_at) {
-      router.replace("/login", {});
-      return;
-    }
+      if (authError || !user || !user.email_confirmed_at) {
+        router.replace("/login");
+        return;
+      }
 
-    setUserId(user.id);
+      setUserId(user.id);
 
-    const { data: profileData, error: profileError } = await supabase
-      .from("customer_profiles")
-      .select(
-        "full_name, username, email, phone, country, state, city, delivery_address"
-      )
-      .eq("user_id", user.id)
-      .maybeSingle();
+      const { data: profileData, error: profileError } =
+        await supabase
+          .from("customer_profiles")
+          .select(
+            "full_name, username, email, phone, country, state, city, delivery_address"
+          )
+          .eq("user_id", user.id)
+          .maybeSingle();
 
-    if (profileError) {
-      setError("Unable to load your profile. Please refresh the page.");
-    }
+      if (profileError) {
+        setError("Unable to load your profile. Please refresh the page.");
+      }
 
-    const loadedProfile: CustomerProfile = {
-      full_name: profileData?.full_name || "",
-      username: profileData?.username || "",
-      email: profileData?.email || user.email || "",
-      phone: profileData?.phone || "",
-      country: profileData?.country || "Nigeria",
-      state: profileData?.state || "",
-      city: profileData?.city || "",
-      delivery_address: profileData?.delivery_address || "",
-    };
+      const loadedProfile: CustomerProfile = {
+        full_name: profileData?.full_name || "",
+        username: profileData?.username || "",
+        email: profileData?.email || user.email || "",
+        phone: profileData?.phone || "",
+        country: profileData?.country || "Nigeria",
+        state: profileData?.state || "",
+        city: profileData?.city || "",
+        delivery_address: profileData?.delivery_address || "",
+      };
 
-    setProfile(loadedProfile);
-    setProfileForm(loadedProfile);
+      setProfile(loadedProfile);
+      setProfileForm(loadedProfile);
 
-    const { data: addressData } = await supabase
-      .from("customer_addresses")
-      .select("*")
-      .eq("user_id", user.id)
+      const { data: addressData, error: addressError } =
+        await supabase
+          .from("customer_addresses")
+          .select("*")
+          .eq("user_id", user.id)
+          .order("is_default", { ascending: false })
+          .order("created_at", { ascending: false });
 
-  const [payingOrderId, setPayingOrderId] = useState<string | null>(null);
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
+      if (addressError) {
+        setError("Unable to load your saved addresses.");
+      }
 
-  const loadAccount = useCallback(async () => {
-    setLoading(true);
-    setError("");
+      setAddresses((addressData || []) as CustomerAddress[]);
 
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
+      const { data: orderData, error: orderError } =
+        await supabase
+          .from("customer_orders")
+          .select("*")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: false });
 
-    if (authError || !user || !user.email_confirmed_at) {
-      router.replace("/login");
-      return;
-    }
+      if (orderError) {
+        setError("Unable to load your orders. Please refresh the page.");
+      }
 
-    setUserId(user.id);
+      const customerOrders = (orderData || []) as CustomerOrder[];
+      setOrders(customerOrders);
 
-    const { data: profileData, error: profileError } = await supabase
-      .from("customer_profiles")
-      .select(
-        "full_name, username, email, phone, country, state, city, delivery_address"
-      )
-      .eq("user_id", user.id)
-      .maybeSingle();
+      if (customerOrders.length > 0) {
+        const orderIds = customerOrders.map((order) => order.id);
 
-    if (profileError) {
-      setError("Unable to load your profile. Please refresh the page.");
-    }
+        const { data: itemData, error: itemError } = await supabase
+          .from("order_items")
+          .select("*")
+          .in("order_id", orderIds);
 
-    const loadedProfile: CustomerProfile = {
-      full_name: profileData?.full_name || "",
-      username: profileData?.username || "",
-      email: profileData?.email || user.email || "",
-      phone: profileData?.phone || "",
-      country: profileData?.country || "Nigeria",
-      state: profileData?.state || "",
-      city: profileData?.city || "",
-      delivery_address: profileData?.delivery_address || "",
-    };
+        if (itemError) {
+          setError("Unable to load some order items.");
+        }
 
-    setProfile(loadedProfile);
-    setProfileForm(loadedProfile);
+        const itemsWithImages = await Promise.all(
+          (itemData || []).map(async (item) => {
+            let imageUrl = item.product_image || "";
 
-    const { data: addressData } = await supabase
-      .from("customer_addresses")
-      .select("*")
-      .eq("user_id", user.id)
-      .order("is_default", { ascending: false })
-      .order("created_at", { ascending: false });
+            if (imageUrl && !imageUrl.startsWith("http")) {
+              const { data: signedImage } = await supabase.storage
+                .from("product-images")
+                .createSignedUrl(imageUrl, 3600);
 
-    setAddresses((addressData || []) as CustomerAddress[]);
+              imageUrl = signedImage?.signedUrl || "";
+            }
 
-    const { data: orderData, error: orderError } = await supabase
-      .from("customer_orders")
-      .select("*")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false });
+            return {
+              ...item,
+              product_image: imageUrl || null,
+            };
+          })
+        );
 
-    if (orderError) {
-      setError("Unable to load your orders. Please refresh the page.");
-    }
+        setOrderItems(itemsWithImages as OrderItem[]);
+      } else {
+        setOrderItems([]);
+      }
 
-    const customerOrders = (orderData || []) as CustomerOrder[];
-    setOrders(customerOrders);
+      const { data: invoiceData, error: invoiceError } =
+        await supabase
+          .from("customer_invoices")
+          .select("*")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: false });
 
-    if (customerOrders.length > 0) {
-      const orderIds = customerOrders.map((order) => order.id);
+      if (invoiceError) {
+        setError("Unable to load your invoices. Please refresh the page.");
+      }
 
-      const { data: itemData } = await supabase
-        .from("order_items")
-        .select("*")
-        .in("order_id", orderIds);
+      setInvoices((invoiceData || []) as CustomerInvoice[]);
 
-      const itemsWithImages = await Promise.all(
-        (itemData || []).map(async (item) => {
-          let imageUrl = item.product_image || "";
+      const { data: receiptData, error: receiptError } =
+        await supabase
+          .from("customer_receipts")
+          .select("*")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: false });
 
-          if (imageUrl && !imageUrl.startsWith("http")) {
-            const { data: signedImage } = await supabase.storage
-              .from("product-images")
-              .createSignedUrl(imageUrl, 3600);
+      if (receiptError) {
+        setError("Unable to load your receipts. Please refresh the page.");
+      }
 
-            imageUrl = signedImage?.signedUrl || "";
-          }
-
-          return {
-            ...item,
-            product_image: imageUrl || null,
-          };
-        })
+      setReceipts((receiptData || []) as CustomerReceipt[]);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Something went wrong while loading your account."
       );
-
-      setOrderItems(itemsWithImages as OrderItem[]);
-    } else {
-      setOrderItems([]);
+    } finally {
+      setLoading(false);
     }
-
-    const { data: invoiceData, error: invoiceError } = await supabase
-      .from("customer_invoices")
-      .select("*")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false });
-
-    if (invoiceError) {
-      setError("Unable to load your invoices. Please refresh the page.");
-    }
-
-    setInvoices((invoiceData || []) as CustomerInvoice[]);
-
-    const { data: receiptData, error: receiptError } = await supabase
-      .from("customer_receipts")
-      .select("*")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false });
-
-    if (receiptError) {
-      setError("Unable to load your receipts. Please refresh the page.");
-    }
-
-    setReceipts((receiptData || []) as CustomerReceipt[]);
-
-    setLoading(false);
   }, [router]);
 
   useEffect(() => {
@@ -444,32 +424,36 @@ export default function AccountPage() {
     setMessage("");
     setError("");
 
-    const { error: saveError } = await supabase
-      .from("customer_profiles")
-      .upsert(
-        {
-          user_id: userId,
-          full_name: profileForm.full_name,
-          username: profileForm.username,
-          email: profileForm.email,
-          phone: profileForm.phone,
-          country: profileForm.country,
-          state: profileForm.state,
-          city: profileForm.city,
-          delivery_address: profileForm.delivery_address,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "user_id" }
-      );
+    try {
+      const { error: saveError } = await supabase
+        .from("customer_profiles")
+        .upsert(
+          {
+            user_id: userId,
+            full_name: profileForm.full_name,
+            username: profileForm.username,
+            email: profileForm.email,
+            phone: profileForm.phone,
+            country: profileForm.country,
+            state: profileForm.state,
+            city: profileForm.city,
+            delivery_address: profileForm.delivery_address,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "user_id" }
+        );
 
-    if (saveError) {
-      setError(`Unable to save your profile: ${saveError.message}`);
-    } else {
-      setProfile(profileForm);
-      setMessage("Your profile has been updated successfully.");
+      if (saveError) {
+        setError(`Unable to save your profile: ${saveError.message}`);
+      } else {
+        setProfile(profileForm);
+        setMessage("Your profile has been updated successfully.");
+      }
+    } catch {
+      setError("Unable to save your profile. Please try again.");
+    } finally {
+      setSaving(false);
     }
-
-    setSaving(false);
   }
 
   function openNewAddress() {
@@ -511,11 +495,11 @@ export default function AccountPage() {
     if (!userId) return;
 
     if (
-      !addressForm.full_name ||
-      !addressForm.phone ||
-      !addressForm.state ||
-      !addressForm.city ||
-      !addressForm.delivery_address
+      !addressForm.full_name.trim() ||
+      !addressForm.phone.trim() ||
+      !addressForm.state.trim() ||
+      !addressForm.city.trim() ||
+      !addressForm.delivery_address.trim()
     ) {
       setError("Please complete all required address fields.");
       return;
@@ -525,51 +509,63 @@ export default function AccountPage() {
     setError("");
     setMessage("");
 
-    if (addressForm.is_default) {
-      await supabase
-        .from("customer_addresses")
-        .update({ is_default: false })
-        .eq("user_id", userId);
-    }
-
-    const addressPayload = {
-      user_id: userId,
-      full_name: addressForm.full_name,
-      phone: addressForm.phone,
-      country: addressForm.country,
-      state: addressForm.state,
-      city: addressForm.city,
-      delivery_address: addressForm.delivery_address,
-      address_label: addressForm.address_label,
-      is_default: addressForm.is_default,
-    };
-
-    const result = editingAddressId
-      ? await supabase
+    try {
+      if (addressForm.is_default) {
+        const { error: resetError } = await supabase
           .from("customer_addresses")
-          .update(addressPayload)
-          .eq("id", editingAddressId)
-          .eq("user_id", userId)
+          .update({ is_default: false })
+          .eq("user_id", userId);
 
-      : await supabase.from("customer_addresses").insert(addressPayload);
+        if (resetError) throw resetError;
+      }
 
-    if (result.error) {
-      setError(`Unable to save address: ${result.error.message}`);
-    } else {
+      const addressPayload = {
+        user_id: userId,
+        full_name: addressForm.full_name,
+        phone: addressForm.phone,
+        country: addressForm.country,
+        state: addressForm.state,
+        city: addressForm.city,
+        delivery_address: addressForm.delivery_address,
+        address_label: addressForm.address_label,
+        is_default: addressForm.is_default,
+      };
+
+      const result = editingAddressId
+        ? await supabase
+            .from("customer_addresses")
+            .update(addressPayload)
+            .eq("id", editingAddressId)
+            .eq("user_id", userId)
+        : await supabase
+            .from("customer_addresses")
+            .insert(addressPayload);
+
+      if (result.error) throw result.error;
+
       setMessage("Your address has been saved.");
       setShowAddressForm(false);
+      setEditingAddressId(null);
 
-      const { data } = await supabase
+      const { data, error: refreshError } = await supabase
         .from("customer_addresses")
         .select("*")
         .eq("user_id", userId)
         .order("is_default", { ascending: false })
         .order("created_at", { ascending: false });
 
-      setAddresses((data || []) as CustomerAddress[]);
-    }
+      if (refreshError) throw refreshError;
 
-    setSaving(false);
+      setAddresses((data || []) as CustomerAddress[]);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? `Unable to save address: ${err.message}`
+          : "Unable to save address."
+      );
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function deleteAddress(addressId: string) {
@@ -579,6 +575,9 @@ export default function AccountPage() {
     ) {
       return;
     }
+
+    setError("");
+    setMessage("");
 
     const { error: deleteError } = await supabase
       .from("customer_addresses")
@@ -599,10 +598,18 @@ export default function AccountPage() {
   async function setDefaultAddress(addressId: string) {
     if (!userId) return;
 
-    await supabase
+    setError("");
+    setMessage("");
+
+    const { error: resetError } = await supabase
       .from("customer_addresses")
       .update({ is_default: false })
       .eq("user_id", userId);
+
+    if (resetError) {
+      setError(`Unable to update addresses: ${resetError.message}`);
+      return;
+    }
 
     const { error: updateError } = await supabase
       .from("customer_addresses")
@@ -617,7 +624,8 @@ export default function AccountPage() {
         .from("customer_addresses")
         .select("*")
         .eq("user_id", userId)
-        .order("is_default", { ascending: false });
+        .order("is_default", { ascending: false })
+        .order("created_at", { ascending: false });
 
       setAddresses((data || []) as CustomerAddress[]);
       setMessage("Default address updated.");
@@ -708,9 +716,9 @@ export default function AccountPage() {
         0
       );
 
-    return total + Math.max(
-      0,
-      Number(invoice.amount || 0) - paymentsForInvoice
+    return (
+      total +
+      Math.max(0, Number(invoice.amount || 0) - paymentsForInvoice)
     );
   }, 0);
 
@@ -928,6 +936,7 @@ export default function AccountPage() {
                               {formatDate(order.created_at)}
                             </p>
                           </div>
+
                           <div className="text-right">
                             <p className="font-semibold text-[#43243b]">
                               {formatMoney(
@@ -1099,39 +1108,379 @@ export default function AccountPage() {
                   )}
                 </div>
 
-                            {order.shipping_status || "Not shipped"}
+                {showAddressForm && (
+                  <div className="rounded-2xl border border-[#f0e2ec] bg-white p-6 shadow-sm">
+                    <h3 className="mb-5 text-lg font-bold text-[#43243b]">
+                      {editingAddressId ? "Edit Address" : "Add New Address"}
+                    </h3>
+
+                    <div className="grid gap-5 sm:grid-cols-2">
+                      {(
+                        [
+                          ["full_name", "Full Name"],
+                          ["phone", "Phone Number"],
+                          ["country", "Country"],
+                          ["state", "State"],
+                          ["city", "City"],
+                          ["address_label", "Address Label"],
+                        ] as [keyof AddressForm, string][]
+                      ).map(([key, label]) => (
+                        <div key={key}>
+                          <label className={labelStyle}>{label}</label>
+                          <input
+                            className={inputStyle}
+                            value={String(addressForm[key])}
+                            onChange={(e) =>
+                              setAddressForm({
+                                ...addressForm,
+                                [key]: e.target.value,
+                              })
+                            }
+                            placeholder={label}
+                          />
+                        </div>
+                      ))}
+
+                      <div className="sm:col-span-2">
+                        <label className={labelStyle}>
+                          Delivery Address
+                        </label>
+                        <textarea
+                          className={inputStyle}
+                          rows={3}
+                          value={addressForm.delivery_address}
+                          onChange={(e) =>
+                            setAddressForm({
+                              ...addressForm,
+                              delivery_address: e.target.value,
+                            })
+                          }
+                          placeholder="Enter your complete delivery address"
+                        />
+                      </div>
+
+                      <label className="flex items-center gap-3 text-sm text-[#43243b] sm:col-span-2">
+                        <input
+                          type="checkbox"
+                          checked={addressForm.is_default}
+                          onChange={(e) =>
+                            setAddressForm({
+                              ...addressForm,
+                              is_default: e.target.checked,
+                            })
+                          }
+                          className="h-4 w-4 accent-[#75436d]"
+                        />
+                        Set as my default delivery address
+                      </label>
+                    </div>
+
+                    <div className="mt-6 flex flex-wrap gap-3">
+                      <button
+                        onClick={saveAddress}
+                        disabled={saving}
+                        className="rounded-xl bg-[#75436d] px-6 py-3 text-sm font-semibold text-white hover:bg-[#603657] disabled:opacity-60"
+                      >
+                        {saving ? "Saving..." : "Save Address"}
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          setShowAddressForm(false);
+                          setEditingAddressId(null);
+                        }}
+                        className="rounded-xl border border-[#eadce6] px-6 py-3 text-sm font-semibold text-[#43243b] hover:bg-[#f9edf5]"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {addresses.length === 0 && !showAddressForm ? (
+                  <div className="rounded-2xl border border-[#f0e2ec] bg-white p-8 text-center">
+                    <p className="font-semibold text-[#43243b]">
+                      No saved addresses
+                    </p>
+                    <p className="mt-2 text-sm text-[#756574]">
+                      Add an address to make future orders easier.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid gap-4 md:grid-cols-2">
+                    {addresses.map((address) => (
+                      <article
+                        key={address.id}
+                        className="rounded-2xl border border-[#f0e2ec] bg-white p-5 shadow-sm"
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <div>
+                            <h3 className="font-bold text-[#43243b]">
+                              {address.address_label || "Delivery Address"}
+                            </h3>
+                            <p className="mt-1 text-sm text-[#756574]">
+                              {address.full_name}
+                            </p>
+                          </div>
+
+                          {address.is_default && (
+                            <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-semibold text-green-800">
+                              Default
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="mt-4 space-y-1 text-sm text-[#5f4b5c]">
+                          <p>{address.phone}</p>
+                          <p>{address.delivery_address}</p>
+                          <p>
+                            {address.city}, {address.state},{" "}
+                            {address.country}
+                          </p>
+                        </div>
+
+                        <div className="mt-5 flex flex-wrap gap-3 border-t border-[#f0e2ec] pt-4">
+                          <button
+                            onClick={() => openEditAddress(address)}
+                            className="text-sm font-semibold text-[#75436d] hover:underline"
+                          >
+                            Edit
+                          </button>
+
+                          {!address.is_default && (
+                            <button
+                              onClick={() => setDefaultAddress(address.id)}
+                              className="text-sm font-semibold text-[#75436d] hover:underline"
+                            >
+                              Set as default
+                            </button>
+                          )}
+
+                          <button
+                            onClick={() => deleteAddress(address.id)}
+                            className="text-sm font-semibold text-red-600 hover:underline"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {view === "orders" && (
+              <div className="space-y-5">
+                <div>
+                  <h2 className="text-xl font-bold text-[#43243b]">
+                    My Orders
+                  </h2>
+                  <p className="mt-1 text-sm text-[#756574]">
+                    View your orders, payments and delivery updates.
+                  </p>
+                </div>
+
+                {orders.length === 0 ? (
+                  <div className="rounded-2xl border border-[#f0e2ec] bg-white p-8 text-center">
+                    <p className="font-semibold text-[#43243b]">
+                      No orders available
+                    </p>
+                    <p className="mt-2 text-sm text-[#756574]">
+                      Your orders will appear here after checkout.
+                    </p>
+                    <button
+                      onClick={() => router.push("/")}
+                      className="mt-5 rounded-xl bg-[#75436d] px-6 py-3 text-sm font-semibold text-white"
+                    >
+                      Start Shopping
+                    </button>
+                  </div>
+                ) : (
+                  orders.map((order) => (
+                    <article
+                      key={order.id}
+                      className="rounded-2xl border border-[#f0e2ec] bg-white p-5 shadow-sm sm:p-6"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-4">
+                        <div>
+                          <p className="text-xs text-[#756574]">
+                            Order Number
+                          </p>
+                          <h3 className="mt-1 text-lg font-bold text-[#43243b]">
+                            {order.order_number}
+                          </h3>
+                          <p className="mt-1 text-xs text-[#756574]">
+                            Placed {formatDate(order.created_at)}
+                          </p>
+                        </div>
+
+                        <div className="flex flex-wrap gap-2">
+                          <span
+                            className={`rounded-full px-3 py-1 text-xs font-semibold ${statusStyle(
+                              order.order_status
+                            )}`}
+                          >
+                            {order.order_status || "Pending"}
+                          </span>
+
+                          <span
+                            className={`rounded-full px-3 py-1 text-xs font-semibold ${statusStyle(
+                              order.payment_status
+                            )}`}
+                          >
+                            {order.payment_status || "Unpaid"}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="mt-5 space-y-3 border-t border-[#f0e2ec] pt-4">
+                        <h4 className="text-sm font-bold text-[#43243b]">
+                          Order Items
+                        </h4>
+
+                        {itemsForOrder(order.id).length === 0 ? (
+                          <p className="text-sm text-[#756574]">
+                            No order items available.
+                          </p>
+                        ) : (
+                          itemsForOrder(order.id).map((item) => (
+                            <div
+                              key={item.id}
+                              className="flex items-center gap-3 rounded-xl bg-[#fff8fc] p-3"
+                            >
+                              {item.product_image ? (
+                                <img
+                                  src={item.product_image}
+                                  alt={item.product_name}
+                                  className="h-16 w-16 rounded-lg border border-[#f0e2ec] object-cover"
+                                />
+                              ) : (
+                                <div className="flex h-16 w-16 items-center justify-center rounded-lg bg-[#f9edf5] text-xs text-[#856b80]">
+                                  Oraia
+                                </div>
+                              )}
+
+                              <div className="min-w-0 flex-1">
+                                <p className="text-sm font-semibold text-[#43243b]">
+                                  {item.product_name}
+                                </p>
+                                <p className="mt-1 text-xs text-[#756574]">
+                                  Quantity: {item.quantity}
+                                </p>
+                              </div>
+
+                              <p className="text-sm font-semibold text-[#43243b]">
+                                {formatMoney(
+                                  item.total_price,
+                                  order.currency || "NGN"
+                                )}
+                              </p>
+                            </div>
+                          ))
+                        )}
+                      </div>
+
+                      <div className="mt-5 grid gap-4 border-t border-[#f0e2ec] pt-4 sm:grid-cols-2">
+                        <div>
+                          <p className="text-xs text-[#756574]">
+                            Subtotal
+                          </p>
+                          <p className="mt-1 text-sm font-semibold text-[#43243b]">
+                            {formatMoney(
+                              order.subtotal,
+                              order.currency || "NGN"
+                            )}
                           </p>
                         </div>
 
                         <div>
                           <p className="text-xs text-[#756574]">
-                            Shipping Carrier
+                            Order Total
                           </p>
-                          <p className="mt-1 text-sm font-medium text-[#43243b]">
-                            {order.shipping_carrier || "Not yet assigned"}
-                          </p>
-                        </div>
-
-                        <div>
-                          <p className="text-xs text-[#756574]">
-                            Tracking Number
-                          </p>
-                          <p className="mt-1 break-all text-sm font-medium text-[#43243b]">
-                            {order.tracking_number || "Not yet available"}
+                          <p className="mt-1 text-lg font-bold text-[#43243b]">
+                            {formatMoney(
+                              order.total_amount,
+                              order.currency || "NGN"
+                            )}
                           </p>
                         </div>
                       </div>
 
-                      {order.shipping_notes && (
-                        <div className="mt-4 rounded-xl bg-[#fff8fc] p-4">
-                          <p className="text-xs font-semibold text-[#75436d]">
-                            Delivery Update
-                          </p>
-                          <p className="mt-1 text-sm leading-6 text-[#493a49]">
-                            {order.shipping_notes}
-                          </p>
+                      <div className="mt-5 rounded-xl border border-[#f0e2ec] bg-[#fff8fc] p-4">
+                        <h4 className="mb-4 font-bold text-[#43243b]">
+                          Shipping Information
+                        </h4>
+
+                        <div className="grid gap-4 sm:grid-cols-2">
+                          <div>
+                            <p className="text-xs text-[#756574]">
+                              Shipping Status
+                            </p>
+                            <p className="mt-1 text-sm font-medium text-[#43243b]">
+                              {order.shipping_status || "Not shipped"}
+                            </p>
+                          </div>
+
+                          <div>
+                            <p className="text-xs text-[#756574]">
+                              Shipping Carrier
+                            </p>
+                            <p className="mt-1 text-sm font-medium text-[#43243b]">
+                              {order.shipping_carrier || "Not yet assigned"}
+                            </p>
+                          </div>
+
+                          <div>
+                            <p className="text-xs text-[#756574]">
+                              Tracking Number
+                            </p>
+                            <p className="mt-1 break-all text-sm font-medium text-[#43243b]">
+                              {order.tracking_number || "Not yet available"}
+                            </p>
+                          </div>
+
+                          <div>
+                            <p className="text-xs text-[#756574]">
+                              Dispatch Date
+                            </p>
+                            <p className="mt-1 text-sm font-medium text-[#43243b]">
+                              {formatDate(order.shipping_dispatch_date)}
+                            </p>
+                          </div>
+
+                          <div>
+                            <p className="text-xs text-[#756574]">
+                              Estimated Delivery
+                            </p>
+                            <p className="mt-1 text-sm font-medium text-[#43243b]">
+                              {formatDate(order.shipping_estimated_delivery)}
+                            </p>
+                          </div>
                         </div>
-                      )}
+
+                        {order.shipping_tracking_url && (
+                          <a
+                            href={order.shipping_tracking_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="mt-4 inline-block text-sm font-semibold text-[#75436d] underline"
+                          >
+                            Track Shipment →
+                          </a>
+                        )}
+
+                        {order.shipping_notes && (
+                          <div className="mt-4 rounded-xl bg-white p-4">
+                            <p className="text-xs font-semibold text-[#75436d]">
+                              Delivery Update
+                            </p>
+                            <p className="mt-1 text-sm leading-6 text-[#493a49]">
+                              {order.shipping_notes}
+                            </p>
+                          </div>
+                        )}
+                      </div>
 
                       {order.payment_status?.toUpperCase() !== "PAID" &&
                         order.order_status?.toUpperCase() !== "CANCELLED" && (
@@ -1146,8 +1495,10 @@ export default function AccountPage() {
                                 ? "Opening Secure Payment..."
                                 : "Continue Payment"}
                             </button>
+
                             <p className="mt-2 text-xs text-[#756574]">
-                              Complete payment for this order without placing a new order.
+                              Complete payment for this order without placing
+                              a new order.
                             </p>
                           </div>
                         )}
@@ -1272,8 +1623,8 @@ export default function AccountPage() {
                       No receipts available
                     </p>
                     <p className="mt-2 text-sm text-[#756574]">
-                      Your payment receipts will appear here once your payments
-                      have been confirmed.
+                      Your payment receipts will appear here once your
+                      payments have been confirmed.
                     </p>
                   </div>
                 ) : (
@@ -1361,4 +1712,3 @@ export default function AccountPage() {
     </main>
   );
 }
-
